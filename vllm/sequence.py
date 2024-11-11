@@ -463,6 +463,14 @@ class Sequence:
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
 
+        
+        #Estimated Speech Output Duration
+        self.seq_duration = 0.0  # 初始化语音总时长
+
+    def calculate_sentence_duration(self, sentence: str) -> float:
+        k = 0.2  # 假设每个字符对应0.2秒的语音时长，这个值可以根据实际情况调整
+        return len(sentence) * k
+
     @property
     def n_blocks(self) -> int:
         return (self.get_len() + self.block_size - 1) // self.block_size
@@ -579,6 +587,20 @@ class Sequence:
         assert token_id in logprobs
         self.output_logprobs.append(logprobs)
         self.data.append_token_id(token_id, logprobs[token_id].logprob)
+
+        # 获取自上次调用以来新生成的文本
+        current_output_text = self.get_output_text_to_return(buffer_length=0, delta=True)
+        
+        # 检查是否生成了新的分句
+        if self.is_sentence_end(current_output_text):
+            # 计算新的分句时长
+            sentence_duration = self.calculate_sentence_duration(current_output_text)
+            # 更新总语音时长
+            self.seq_duration += sentence_duration
+
+    def is_sentence_end(self, text: str) -> bool:
+        # 检查文本是否以句号、逗号、感叹号、问号、分号或冒号结束
+        return text.endswith(('。', '，', '！', '？', '；', '：'))  
 
     def get_len(self) -> int:
         return self.data.get_len()
