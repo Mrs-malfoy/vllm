@@ -593,8 +593,26 @@ class Sequence:
         
         # 检查是否生成了新的分句
         if self.is_sentence_end(current_output_text):
-            # 计算新的分句时长
-            sentence_duration = self.calculate_sentence_duration(current_output_text)
+            # 获取当前完整的输出文本
+            full_text = self.get_output_text_to_return(buffer_length=0, delta=False)
+            # 从最后一个句子结束符位置开始，提取最新的完整句子
+            last_sentence_start = max(
+                full_text[:-1].rfind('。'),
+                full_text[:-1].rfind('！'),
+                full_text[:-1].rfind('？'),
+                full_text[:-1].rfind('；'),
+                full_text[:-1].rfind('：'),
+                full_text[:-1].rfind('，')
+            )
+            if last_sentence_start == -1:
+                # 如果找不到前一个句子结束符，说明这是第一个句子
+                latest_sentence = full_text
+            else:
+                # 提取最新的完整句子
+                latest_sentence = full_text[last_sentence_start + 1:]
+                
+            # 计算新的完整句子的时长
+            sentence_duration = self.calculate_sentence_duration(latest_sentence)
             # 更新总语音时长
             self.seq_duration += sentence_duration
 

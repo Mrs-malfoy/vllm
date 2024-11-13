@@ -16,6 +16,62 @@ from .utils import (append_new_token, append_new_token_seq_group,
                     create_dummy_prompt, get_sequence_groups,
                     schedule_and_update_computed_tokens)
 
+def test_sequence_duration_calculation():
+    """Test if sequence duration is correctly calculated when generating tokens."""
+    block_size = 4
+    scheduler = initialize_scheduler(block_size=block_size)
+    
+    # 创建一个序列组
+    prompt = "你好"
+    _, seq_group = create_dummy_prompt("1", 
+                                     prompt_length=len(prompt), 
+                                     block_size=block_size)
+    
+    # 初始时duration应该为0
+    assert seq_group.seqs[0].seq_duration == 0.0
+    
+    scheduler.add_seq_group(seq_group)
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    
+    # 获取序列
+    seq = seq_group.seqs[0]
+    
+    # 模拟逐字生成第一个句子 "今天天气不错。"
+    test_sentence = "今天天气不错。"
+    current_text = ""
+    for char in test_sentence:
+        prev_duration = seq.seq_duration
+        current_text += char
+        seq.output_text = current_text
+        seq.append_token_id(1, {1: MagicMock(logprob=0.0)})
+        
+        # 只有在句子结束时才会增加duration
+        if seq.is_sentence_end(char):
+            expected_duration = prev_duration + seq.calculate_sentence_duration(test_sentence)
+            assert abs(seq.seq_duration - expected_duration) < 1e-6
+        else:
+            assert abs(seq.seq_duration - prev_duration) < 1e-6
+
+    # 记录第一个句子完成后的duration
+    first_sentence_duration = seq.seq_duration
+    assert abs(first_sentence_duration - seq.calculate_sentence_duration(test_sentence)) < 1e-6
+
+    # 模拟逐字生成第二个句子 "你吃饭了吗？"
+    test_sentence = "你吃饭了吗？"
+    for char in test_sentence:
+        prev_duration = seq.seq_duration
+        current_text += char
+        seq.output_text = current_text
+        seq.append_token_id(1, {1: MagicMock(logprob=0.0)})
+        
+        # 只有在句子结束时才会增加duration
+        if seq.is_sentence_end(char):
+            expected_duration = first_sentence_duration + seq.calculate_sentence_duration(test_sentence)
+            assert abs(seq.seq_duration - expected_duration) < 1e-6
+        else:
+            assert abs(seq.seq_duration - prev_duration) < 1e-6
+
+            
 def test_scheduler_force_schedule_by_wait_time():
     """测试基于等待时间的强制调度功能"""
     block_size = 4
