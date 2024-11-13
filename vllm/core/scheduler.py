@@ -311,6 +311,8 @@ class Scheduler:
         # simple and NOT fair. It can lead to starvation of some
         # LoRAs. This should be improved in the future.
         self.lora_config = lora_config
+        
+        self.max_wait_time = scheduler_config.max_wait_time
 
         version = "selfattn"
         if (self.scheduler_config.embedding_mode
@@ -407,6 +409,24 @@ class Scheduler:
     def num_decoding_tokens_per_seq(self) -> int:
         """The number of new tokens."""
         return 1
+
+    def _should_force_schedule(self, seq_group: SequenceGroup, alloc_status: AllocStatus) -> bool:
+        """检查序列组是否需要强制调度
+        
+        Args:
+            seq_group: 待检查的序列组
+            alloc_status: 资源分配状态
+            
+        Returns:
+            bool: 是否需要强制调度
+        """
+        # 只对LATER状态的序列进行强制调度检查
+        if alloc_status != AllocStatus.LATER:
+            return False
+            
+        current_time = time.time()
+        wait_time = current_time - seq_group.arrival_time
+        return wait_time > self.max_wait_time
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
@@ -909,9 +929,7 @@ class Scheduler:
             # If the sequence group cannot be allocated, stop.
             can_allocate = self.block_manager.can_allocate(
                 seq_group, num_lookahead_slots=num_lookahead_slots)
-            if can_allocate == AllocStatus.LATER:
-                break
-            elif can_allocate == AllocStatus.NEVER:
+            if can_allocate == AllocStatus.NEVER:
                 logger.warning(
                     "Input prompt (%d tokens) + lookahead slots (%d) is "
                     "too long and exceeds the capacity of block_manager",
@@ -921,6 +939,38 @@ class Scheduler:
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
                 continue
+
+            if can_allocate == AllocStatus.LATER:
+                # 只对LATER状态检查是否需要强制调度
+                if self._should_force_schedule(seq_group, can_allocate):
+                    logger.info(
+                        f"Attempting force schedule for sequence {seq_group.request_id} "
+                        f"(waited for {time.time() - seq_group.arrival_time:.2f}s)"
+                    )
+                    
+                    if self._force_preempt_for_waiting_seq(seq_group, []):
+                        # 抢占成功,继续处理该序列
+                        waiting_queue.popleft()
+                        self._allocate_and_set_running(seq_group)
+                        num_new_tokens = self._get_num_new_tokens(
+                            seq_group,
+                            SequenceStatus.WAITING,
+                            enable_chunking,
+                            budget
+                        )
+                        seq_groups.append(
+                            ScheduledSequenceGroup(
+                                seq_group=seq_group,
+                                token_chunk_size=num_new_tokens
+                            )
+                        )
+                        continue
+                    else:
+                        logger.warning(
+                            f"Failed to force schedule sequence {seq_group.request_id} "
+                            f"after waiting for {time.time() - seq_group.arrival_time:.2f}s"
+                        )
+                break
 
             lora_int_id = 0
             if self.lora_enabled:
@@ -981,6 +1031,45 @@ class Scheduler:
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(
                 is_prefill=True, enable_chunking=enable_chunking))
+
+    def _force_preempt_for_waiting_seq(
+        self, 
+        waiting_seq: SequenceGroup,
+        blocks_to_swap_out: List[Tuple[int, int]]
+    ) -> bool:
+        """为等待过久的序列强制执行抢占
+        
+        Args:
+            waiting_seq: 需要强制调度的序列组
+            blocks_to_swap_out: 需要交换出的块列表
+            
+        Returns:
+            bool: 是否成功执行抢占
+        """    
+        # 按运行时间排序,优先抢占运行时间最长的序列
+        running_seqs = sorted(
+            self.running,
+            key=lambda x: x.metrics.first_scheduled_time if x.metrics else 0,
+            reverse=True
+        )
+        
+        preempted_seqs = []
+        for victim in running_seqs:
+            # 执行抢占
+            self._preempt(victim, blocks_to_swap_out)
+            preempted_seqs.append(victim)
+            
+            # 检查当前资源是否足够
+            if self.block_manager.can_allocate(waiting_seq) == AllocStatus.OK:
+                return True
+                
+        # 如果抢占所有序列后仍无法分配,则恢复抢占的序列
+        for seq in preempted_seqs:
+            self.running.append(seq)
+            # 注意:_preempt()已经处理了blocks的swap,
+            # 所以这里不需要额外处理blocks的恢复
+            
+        return False
 
     def _schedule_default(self) -> SchedulerOutputs:
         """Schedule queued requests.

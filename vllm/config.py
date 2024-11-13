@@ -975,6 +975,7 @@ class SchedulerConfig:
                  max_num_batched_tokens: Optional[int],
                  max_num_seqs: int,
                  max_model_len: int,
+                 max_wait_time: float = 30.0,  # 添加最大等待时间配置,默认30秒
                  num_lookahead_slots: int = 0,
                  delay_factor: float = 0.0,
                  enable_chunked_prefill: bool = False,
@@ -1033,6 +1034,7 @@ class SchedulerConfig:
         self.multi_step_stream_outputs = multi_step_stream_outputs
         self.send_delta_data = send_delta_data
         self.policy = policy
+        self.max_wait_time = max_wait_time
         self._verify_args()
 
     def _verify_args(self) -> None:

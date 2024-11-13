@@ -16,6 +16,63 @@ from .utils import (append_new_token, append_new_token_seq_group,
                     create_dummy_prompt, get_sequence_groups,
                     schedule_and_update_computed_tokens)
 
+def test_scheduler_force_schedule_by_wait_time():
+    """测试基于等待时间的强制调度功能"""
+    block_size = 4
+    scheduler_config = SchedulerConfig(
+        max_num_batched_tokens=16,  # 减小总的token预算
+        max_num_seqs=2,  # 减小最大序列数
+        max_model_len=16,
+        max_wait_time=0.5
+    )
+    cache_config = CacheConfig(
+        block_size=block_size,
+        gpu_memory_utilization=0.4,  # 减小GPU内存使用率
+        swap_space=1,
+        cache_dtype="auto"
+    )
+    cache_config.num_cpu_blocks = 4  # 减小CPU块数
+    cache_config.num_gpu_blocks = 4  # 减小GPU块数
+    scheduler = Scheduler(scheduler_config, cache_config, None)
+
+    # 1. 首先添加并调度一个长序列占用大部分资源
+    _, long_seq = create_dummy_prompt(
+        "1",
+        prompt_length=12,  # 占用大量block
+        block_size=block_size,
+        best_of=2  # 增加beam search数量来占用更多资源
+    )
+    scheduler.add_seq_group(long_seq)
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    assert out.num_prefill_groups == 1
+    append_new_token(out, 1)
+
+    # 2. 添加一个新的序列,此时应该因为资源不足而等待
+    _, waiting_seq = create_dummy_prompt(
+        "2",
+        prompt_length=8,  # 增加prompt长度
+        block_size=block_size
+    )
+    scheduler.add_seq_group(waiting_seq)
+    
+    # 第一次调度,waiting_seq应该无法调度
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler) 
+    assert waiting_seq not in get_sequence_groups(out)
+    append_new_token(out, 1)
+
+    # 3. 等待超过最大等待时间
+    time.sleep(0.5)
+    
+    # 4. 再次调度,这时waiting_seq应该被强制调度
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    
+    scheduled_groups = get_sequence_groups(out)
+    assert waiting_seq in scheduled_groups
+    assert long_seq not in scheduled_groups
+    assert out.blocks_to_swap_out
+    
+    # 5. 确认long_seq进入了waiting队列
+    assert long_seq in scheduler.waiting
 
 def test_scheduler_add_seq_group():
     block_size = 4
