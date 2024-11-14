@@ -1046,10 +1046,13 @@ class Scheduler:
         Returns:
             bool: 是否成功执行抢占
         """    
-        # 按运行时间排序,优先抢占运行时间最长的序列
+        # 按剩余可播放时间排序,优先抢占剩余时间长的序列
         running_seqs = sorted(
             self.running,
-            key=lambda x: x.metrics.first_scheduled_time if x.metrics else 0,
+            key=lambda x: (
+                x.seqs[0].seq_duration - (time.time() - x.metrics.first_scheduled_time) 
+                if x.metrics else 0
+            ),
             reverse=True
         )
         

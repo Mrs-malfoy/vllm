@@ -16,6 +16,72 @@ from .utils import (append_new_token, append_new_token_seq_group,
                     create_dummy_prompt, get_sequence_groups,
                     schedule_and_update_computed_tokens)
 
+def test_preemption_by_remaining_playback_time():
+    """Test if sequences are preempted based on remaining playback time."""
+    block_size = 4
+    scheduler_config = SchedulerConfig(
+        max_num_batched_tokens=128,  # 限制批处理token数
+        max_num_seqs=4,  # 限制序列数
+        max_model_len=128,  #单个序列(包括输入提示和生成的文本)的最大长度限制
+    )
+    cache_config = CacheConfig(
+        block_size=block_size,
+        gpu_memory_utilization=0.4,  # 减小GPU内存使用率
+        swap_space=1,   #CPU内存中用于交换的空间大小(单位:GB)
+        cache_dtype="auto"
+    )
+    cache_config.num_cpu_blocks = 2
+    cache_config.num_gpu_blocks = 2
+    scheduler = Scheduler(scheduler_config, cache_config, None)
+    
+    # 创建三个序列组,模拟不同的语音时长场景
+    seq_groups = []
+    for i in range(3):
+        _, seq_group = create_dummy_prompt(str(i), 
+                                         prompt_length=block_size,
+                                         block_size=block_size)
+        scheduler.add_seq_group(seq_group)
+        # 调度并更新计算的tokens
+        seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+        append_new_token(out, 1)  # 添加一个token使其进入运行状态
+        seq_groups.append(seq_group)
+        
+    # 设置不同的语音时长和开始时间
+    current_time = time.time()
+    
+    # 序列1: 长语音,刚开始生成 (剩余时间最长)
+    seq_groups[0].seqs[0].seq_duration = 10.0  # 10秒语音
+    seq_groups[0].metrics.first_scheduled_time = current_time
+    
+    # 序列2: 中等语音,已生成一段时间
+    seq_groups[1].seqs[0].seq_duration = 6.0  # 6秒语音
+    seq_groups[1].metrics.first_scheduled_time = current_time - 2.0  # 2秒前开始
+    
+    # 序列3: 短语音,已生成较长时间
+    seq_groups[2].seqs[0].seq_duration = 3.0  # 3秒语音
+    seq_groups[2].metrics.first_scheduled_time = current_time - 1.0  # 1秒前开始
+    
+    # 添加新序列触发抢占
+    _, new_seq_group = create_dummy_prompt("4", 
+                                         prompt_length=block_size * 2,  # 使用更长的提示以确保需要更多资源
+                                         block_size=block_size)
+    scheduler.add_seq_group(new_seq_group)
+    
+    # 执行调度
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    
+    # 验证抢占顺序
+    preempted_groups = [group for group in seq_groups if group not in scheduler.running]
+    assert len(preempted_groups) > 0  # 确保有序列被抢占
+    
+    if len(preempted_groups) >= 1:
+        # 验证剩余时间最长的序列(序列1)被优先抢占
+        assert preempted_groups[0].request_id == "0"
+        
+    if len(preempted_groups) >= 2:
+        # 验证剩余时间次长的序列(序列2)被第二个抢占
+        assert preempted_groups[1].request_id == "1"
+
 def test_sequence_duration_calculation():
     """Test if sequence duration is correctly calculated when generating tokens."""
     block_size = 4

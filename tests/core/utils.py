@@ -13,7 +13,7 @@ def create_dummy_prompt(
     prompt_length: int,
     block_size: Optional[int] = None,
     lora_request: Optional[LoRARequest] = None,
-    best_of: int = 1,
+    best_of: int = 1,   # 生成多少个候选序列
     prompt_tokens: Optional[List[int]] = None,
     min_tokens: int = 0,
     max_tokens: int = 16,
