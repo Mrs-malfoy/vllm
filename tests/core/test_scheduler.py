@@ -16,6 +16,110 @@ from .utils import (append_new_token, append_new_token_seq_group,
                     create_dummy_prompt, get_sequence_groups,
                     schedule_and_update_computed_tokens)
 
+def test_force_schedule_and_duration():
+    """测试强制调度功能和语音时长计算的完整流程"""
+    block_size = 4
+    scheduler_config = SchedulerConfig(
+        max_num_batched_tokens=128,
+        max_num_seqs=4,
+        max_model_len=128,
+        max_wait_time=0.5  # 设置较短的等待时间以便测试
+    )
+    cache_config = CacheConfig(
+        block_size=block_size,
+        gpu_memory_utilization=0.4,
+        swap_space=1,
+        cache_dtype="auto"
+    )
+    cache_config.num_cpu_blocks = 2
+    cache_config.num_gpu_blocks = 2
+    scheduler = Scheduler(scheduler_config, cache_config, None)
+
+    # 1. 创建并调度两个running序列
+    prompt_tokens = [0] * block_size
+    
+    # 创建长语音序列(10秒)
+    _, long_seq = create_dummy_prompt(
+        "1", 
+        prompt_length=block_size,
+        block_size=block_size,
+        prompt_tokens=prompt_tokens
+    )
+    scheduler.add_seq_group(long_seq)
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    append_new_token(out, 1)
+    long_seq.seqs[0].seq_duration = 10.0
+    long_seq.seqs[0].output_text = "今天天气真不错。"
+    
+    # 创建短语音序列(3秒)
+    _, short_seq = create_dummy_prompt(
+        "2",
+        prompt_length=block_size,
+        block_size=block_size,
+        prompt_tokens=prompt_tokens
+    )
+    scheduler.add_seq_group(short_seq)
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    append_new_token(out, 1)
+    short_seq.seqs[0].seq_duration = 3.0
+    short_seq.seqs[0].output_text = "你好啊。"
+
+    # 2. 创建waiting序列
+    _, waiting_seq = create_dummy_prompt(
+        "3",
+        prompt_length=block_size,
+        block_size=block_size,
+        prompt_tokens=prompt_tokens
+    )
+    scheduler.add_seq_group(waiting_seq)
+    
+    # 3. 第一次调度,waiting_seq应该在等待队列
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    assert waiting_seq not in get_sequence_groups(out)
+    assert waiting_seq in scheduler.waiting
+    
+    # 4. 等待超过最大等待时间
+    time.sleep(0.5)
+    
+    # 5. 再次调度,这时waiting_seq应该被强制调度
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    scheduled_groups = get_sequence_groups(out)
+    
+    # 验证调度结果
+    assert waiting_seq in scheduled_groups, "waiting_seq应该被调度"
+    assert long_seq not in scheduled_groups, "long_seq应该被抢占(剩余时间最长)"
+    assert short_seq in scheduled_groups, "short_seq应该继续运行(剩余时间较短)"
+    assert out.blocks_to_swap_out, "应该有blocks被换出"
+    
+    # 验证被抢占的序列进入waiting队列
+    assert long_seq in scheduler.waiting, "被抢占的long_seq应该进入waiting队列"
+    
+    # 6. 继续生成并验证语音时长计算
+    if short_seq in scheduler.running:
+        seq = short_seq.seqs[0]
+        # 继续生成新句子
+        prev_duration = seq.seq_duration
+        prev_text = seq.output_text
+        new_sentence = "今天过得怎么样？"
+        seq.output_text = prev_text + new_sentence
+        append_new_token(out, 1)
+        
+        # 验证语音时长计算
+        # 1) 总时长应该是所有句子的和
+        sentences = [s.strip() for s in seq.output_text.split("。") if s.strip()]
+        expected_duration = sum(
+            seq.calculate_sentence_duration(s + "。") 
+            for s in sentences
+        )
+        assert abs(seq.seq_duration - expected_duration) < 1e-6
+        
+        # 2) 新时长应该大于原时长
+        assert seq.seq_duration > prev_duration
+        
+    # 7. 验证新的waiting序列(之前的long_seq)可以再次被调度
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    assert long_seq in get_sequence_groups(out), "被抢占的序列应该可以再次被调度"
+
 def test_preemption_by_remaining_playback_time():
     """Test if sequences are preempted based on remaining playback time."""
     block_size = 4
@@ -193,8 +297,8 @@ def test_scheduler_force_schedule_by_wait_time():
     assert long_seq not in scheduled_groups
     assert out.blocks_to_swap_out
     
-    # 5. 确认long_seq进入了waiting队列
-    assert long_seq in scheduler.waiting
+    # 5. 确认long_seq进入了swapped队列
+    assert long_seq in scheduler.swapped
 
 def test_scheduler_add_seq_group():
     block_size = 4

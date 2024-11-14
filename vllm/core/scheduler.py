@@ -256,6 +256,9 @@ class SchedulerPrefillOutputs:
     """
     # Selected sequences for prefill.
     seq_groups: List[ScheduledSequenceGroup]
+    # Blocks to swap out during preemption. List of GPU -> CPU block number.
+    blocks_to_swap_out: List[Tuple[int, int]]
+    swapped_out: List[SequenceGroup]  # 添加这个属性
     # Ignored sequence groups.
     ignored_seq_groups: List[SequenceGroup]
     num_lookahead_slots: int
@@ -264,6 +267,8 @@ class SchedulerPrefillOutputs:
     def create_empty(cls) -> "SchedulerPrefillOutputs":
         return SchedulerPrefillOutputs(
             seq_groups=[],
+            blocks_to_swap_out=[],  # 添加空的 blocks_to_swap_out
+            swapped_out=[],  # 初始化
             ignored_seq_groups=[],
             num_lookahead_slots=0,
         )
@@ -892,6 +897,8 @@ class Scheduler:
         """
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []
+        blocks_to_swap_out: List[Tuple[int, int]] = []
+        swapped_out = []
 
         waiting_queue = self.waiting
 
@@ -947,17 +954,14 @@ class Scheduler:
                         f"Attempting force schedule for sequence {seq_group.request_id} "
                         f"(waited for {time.time() - seq_group.arrival_time:.2f}s)"
                     )
-                    
-                    if self._force_preempt_for_waiting_seq(seq_group, []):
+                    success, preempted = self._force_preempt_for_waiting_seq(
+                    seq_group, blocks_to_swap_out)
+                    if success:
                         # 抢占成功,继续处理该序列
+                        swapped_out.extend(preempted)
                         waiting_queue.popleft()
                         self._allocate_and_set_running(seq_group)
-                        num_new_tokens = self._get_num_new_tokens(
-                            seq_group,
-                            SequenceStatus.WAITING,
-                            enable_chunking,
-                            budget
-                        )
+                        
                         seq_groups.append(
                             ScheduledSequenceGroup(
                                 seq_group=seq_group,
@@ -1028,6 +1032,8 @@ class Scheduler:
 
         return SchedulerPrefillOutputs(
             seq_groups=seq_groups,
+            blocks_to_swap_out=blocks_to_swap_out,
+            swapped_out=swapped_out,
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(
                 is_prefill=True, enable_chunking=enable_chunking))
@@ -1036,7 +1042,7 @@ class Scheduler:
         self, 
         waiting_seq: SequenceGroup,
         blocks_to_swap_out: List[Tuple[int, int]]
-    ) -> bool:
+    ) -> Tuple[bool, List[SequenceGroup]]:
         """为等待过久的序列强制执行抢占
         
         Args:
@@ -1059,12 +1065,12 @@ class Scheduler:
         preempted_seqs = []
         for victim in running_seqs:
             # 执行抢占
-            self._preempt(victim, blocks_to_swap_out)
+            self._preempt(victim, blocks_to_swap_out, preemption_mode=PreemptionMode.SWAP)
             preempted_seqs.append(victim)
             
             # 检查当前资源是否足够
             if self.block_manager.can_allocate(waiting_seq) == AllocStatus.OK:
-                return True
+                return True, preempted_seqs  # 返回成功状态和被抢占的序列
                 
         # 如果抢占所有序列后仍无法分配,则恢复抢占的序列
         for seq in preempted_seqs:
@@ -1072,7 +1078,7 @@ class Scheduler:
             # 注意:_preempt()已经处理了blocks的swap,
             # 所以这里不需要额外处理blocks的恢复
             
-        return False
+        return False, []
 
     def _schedule_default(self) -> SchedulerOutputs:
         """Schedule queued requests.
@@ -1140,10 +1146,13 @@ class Scheduler:
             self.running.extend(
                 [s.seq_group for s in swapped_in.decode_seq_groups])
 
+        all_swapped_out = running_scheduled.swapped_out + prefills.swapped_out
+        self.swapped.extend(all_swapped_out)
+    
         # Update swapped requests.
-        self.swapped.extend(running_scheduled.swapped_out)
+        #self.swapped.extend(running_scheduled.swapped_out)
         preempted = (len(running_scheduled.preempted) +
-                     len(running_scheduled.swapped_out))
+                     len(all_swapped_out))
 
         # There should be no prefill from running queue because this policy
         # doesn't allow chunked prefills.
@@ -1165,12 +1174,17 @@ class Scheduler:
         ignored_seq_groups = prefills.ignored_seq_groups
         ignored_seq_groups.extend(swapped_in.infeasible_seq_groups)
 
+        all_blocks_to_swap_out = (running_scheduled.blocks_to_swap_out + 
+                             prefills.blocks_to_swap_out)
+        #all_swapped_out = running_scheduled.swapped_out + prefills.swapped_out
+        
+
         return SchedulerOutputs(
             scheduled_seq_groups=scheduled_seq_groups,
             num_prefill_groups=num_prefill_groups,
             num_batched_tokens=budget.num_batched_tokens,
             blocks_to_swap_in=swapped_in.blocks_to_swap_in,
-            blocks_to_swap_out=running_scheduled.blocks_to_swap_out,
+            blocks_to_swap_out=all_blocks_to_swap_out,  # 使用合并后的列表
             blocks_to_copy=blocks_to_copy,
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=running_scheduled.num_lookahead_slots,
