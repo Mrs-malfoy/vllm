@@ -1053,28 +1053,32 @@ class Scheduler:
             bool: 是否成功执行抢占
         """    
         # 按剩余可播放时间排序,优先抢占剩余时间长的序列
-        running_seqs = sorted(
+        running_seqs = deque(sorted(
             self.running,
             key=lambda x: (
                 x.seqs[0].seq_duration - (time.time() - x.metrics.first_scheduled_time) 
                 if x.metrics else 0
             ),
             reverse=True
-        )
+        ))
+        
         
         preempted_seqs = []
+        
         for victim in running_seqs:
             # 执行抢占
             self._preempt(victim, blocks_to_swap_out, preemption_mode=PreemptionMode.SWAP)
             preempted_seqs.append(victim)
+            running_seqs.popleft()
             
             # 检查当前资源是否足够
             if self.block_manager.can_allocate(waiting_seq) == AllocStatus.OK:
+                self.running = deque(running_seqs)
                 return True, preempted_seqs  # 返回成功状态和被抢占的序列
                 
         # 如果抢占所有序列后仍无法分配,则恢复抢占的序列
-        for seq in preempted_seqs:
-            self.running.append(seq)
+        # for seq in preempted_seqs:
+        #     self.running.append(seq)
             # 注意:_preempt()已经处理了blocks的swap,
             # 所以这里不需要额外处理blocks的恢复
             
@@ -1574,6 +1578,10 @@ class Scheduler:
         # over sequence groups with a single sequence.
         # TODO(woosuk): Support recomputation for sequence groups with multiple
         # sequences. This may require a more sophisticated CUDA kernel.
+        # 如果明确指定了 preemption_mode，就使用指定的模式
+        # if preemption_mode is not None:
+        #     pass  # 保持传入的 preemption_mode 不变
+
         if self.user_specified_preemption_mode is None:
             if seq_group.get_max_num_running_seqs() == 1:
                 preemption_mode = PreemptionMode.RECOMPUTE
