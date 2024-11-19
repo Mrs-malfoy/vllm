@@ -16,6 +16,92 @@ from .utils import (append_new_token, append_new_token_seq_group,
                     create_dummy_prompt, get_sequence_groups,
                     schedule_and_update_computed_tokens)
 
+def test_emergency_swap_in():
+    """测试紧急恢复机制
+    
+    场景:
+    1. 创建3个序列:
+       - seq1: 长语音(10s),刚开始生成
+       - seq2: 中等语音(5s),已运行2s
+       - seq3: 短语音(2s),即将播放完毕,在swapped状态
+    """
+    block_size = 4
+    scheduler_config = SchedulerConfig(
+        max_num_batched_tokens=16,  # 限制总token预算
+        max_num_seqs=3,  # 限制最大序列数,只允许2个序列同时运行
+        max_model_len=16,
+        preemption_mode="swap"  # 使用swap模式进行抢占
+    )
+    cache_config = CacheConfig(
+        block_size=block_size,
+        gpu_memory_utilization=0.4,
+        swap_space=1,
+        cache_dtype="auto",
+    )
+    cache_config.num_cpu_blocks = 4
+    cache_config.num_gpu_blocks = 4
+    
+    scheduler = Scheduler(scheduler_config, cache_config, None)
+    
+    # 创建并运行seq1和seq2
+    current_time = time.time()
+    seq_groups = []
+    
+    for i in range(2):
+        _, seq_group = create_dummy_prompt(str(i), prompt_length=block_size)
+        scheduler.add_seq_group(seq_group)
+        seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+        append_new_token(out, 1)  # 添加token使其进入运行状态
+        seq_groups.append(seq_group)
+    
+    # 设置seq1和seq2的语音时长和开始时间
+    seq_groups[0].seqs[0].seq_duration = 10.0  # seq1: 10s语音
+    seq_groups[0].metrics.first_scheduled_time = current_time
+    
+    seq_groups[1].seqs[0].seq_duration = 5.0  # seq2: 5s语音
+    seq_groups[1].metrics.first_scheduled_time = current_time - 2.0  # 已运行2s
+    
+    # 创建seq3(短语音),并设置为swapped状态
+    _, seq_group3 = create_dummy_prompt("3", prompt_length=block_size)
+    scheduler.add_seq_group(seq_group3)
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+    append_new_token(out, 1)
+    
+    seq_group3.seqs[0].seq_duration = 2.0  # 2s语音
+    seq_group3.metrics.first_scheduled_time = current_time - 1.5  # 已过去1.5s,剩余0.5s
+    
+    # 手动将seq3 swap out
+    blocks_to_swap_out = []
+    scheduler._swap_out(seq_group3, blocks_to_swap_out)
+    scheduler.running.remove(seq_group3)
+    scheduler.swapped.append(seq_group3)
+    for seq in seq_group3.seqs:
+        seq.status = SequenceStatus.SWAPPED
+
+    print(scheduler.running)
+    #print(scheduler.swapped)
+    print(scheduler.waiting)
+    print(scheduler.swapped)
+    # 手动将seq3设为swapped状态
+
+
+    # 执行调度
+    seq_group_meta, out = schedule_and_update_computed_tokens(scheduler)
+
+    print(scheduler.running)
+    #print(scheduler.swapped)
+    print(scheduler.waiting)
+    print(scheduler.swapped)
+    # 手动将seq3设为swapped状态
+    
+    # 验证结果
+    assert seq_group3 in scheduler.running  # seq3应该被恢复
+    assert seq_groups[0] in scheduler.swapped  # seq1应该被抢占(因为剩余时间最长)
+    assert seq_groups[1] in scheduler.running  # seq2应该保持running
+    
+    # 验证抢占的blocks
+    assert len(out.blocks_to_swap_out) > 0  # 确保有抢占发生
+
 def test_force_schedule_with_preemption():
     """测试强制调度触发抢占,验证会抢占剩余时间最长的序列"""
     block_size = 4
