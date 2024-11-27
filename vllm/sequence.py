@@ -588,37 +588,47 @@ class Sequence:
         self.output_logprobs.append(logprobs)
         self.data.append_token_id(token_id, logprobs[token_id].logprob)
 
+        #self.seq_duration = 1.0
+        # print(self.output_text)
+
         # 获取自上次调用以来新生成的文本
-        current_output_text = self.get_output_text_to_return(buffer_length=0, delta=True)
-        
-        # 检查是否生成了新的分句
+        current_output_text = self.output_text
+        #计算新的完整句子的时长
+        # sentence_duration = self.calculate_sentence_duration(current_output_text)
+        # # 更新总语音时长
+        # self.seq_duration = sentence_duration
+        #检查是否生成了新的分句
         if self.is_sentence_end(current_output_text):
-            # 获取当前完整的输出文本
-            full_text = self.get_output_text_to_return(buffer_length=0, delta=False)
-            # 从最后一个句子结束符位置开始，提取最新的完整句子
-            last_sentence_start = max(
-                full_text[:-1].rfind('。'),
-                full_text[:-1].rfind('！'),
-                full_text[:-1].rfind('？'),
-                full_text[:-1].rfind('；'),
-                full_text[:-1].rfind('：'),
-                full_text[:-1].rfind('，')
-            )
-            if last_sentence_start == -1:
-                # 如果找不到前一个句子结束符，说明这是第一个句子
-                latest_sentence = full_text
-            else:
-                # 提取最新的完整句子
-                latest_sentence = full_text[last_sentence_start + 1:]
-                
-            # 计算新的完整句子的时长
-            sentence_duration = self.calculate_sentence_duration(latest_sentence)
+            #计算新的完整句子的时长
+            sentence_duration = self.calculate_sentence_duration(current_output_text)
             # 更新总语音时长
-            self.seq_duration += sentence_duration
+            self.seq_duration = sentence_duration
+        #     # 获取当前完整的输出文本
+        #     full_text = self.get_output_text_to_return(buffer_length=0, delta=False)
+        #     # 从最后一个句子结束符位置开始，提取最新的完整句子
+        #     last_sentence_start = max(
+        #         full_text[:-1].rfind('。'),
+        #         full_text[:-1].rfind('！'),
+        #         full_text[:-1].rfind('？'),
+        #         full_text[:-1].rfind('；'),
+        #         full_text[:-1].rfind('：'),
+        #         full_text[:-1].rfind('，')
+        #     )
+        #     if last_sentence_start == -1:
+        #         # 如果找不到前一个句子结束符，说明这是第一个句子
+        #         latest_sentence = full_text
+        #     else:
+        #         # 提取最新的完整句子
+        #         latest_sentence = full_text[last_sentence_start + 1:]
+                
+        #     # 计算新的完整句子的时长
+        #     sentence_duration = self.calculate_sentence_duration(full_text)
+        #     # 更新总语音时长
+        #     self.seq_duration = sentence_duration
 
     def is_sentence_end(self, text: str) -> bool:
         # 检查文本是否以句号、逗号、感叹号、问号、分号或冒号结束
-        return text.endswith(('。', '，', '！', '？', '；', '：'))  
+        return text.endswith((',', '.', '!', '?', ':', ';', '。', '，', '！', '？', '；', '：'))  
 
     def get_len(self) -> int:
         return self.data.get_len()
