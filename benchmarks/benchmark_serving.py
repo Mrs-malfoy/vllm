@@ -88,7 +88,7 @@ def sample_sharegpt_requests(
     num_requests: int,
     tokenizer: PreTrainedTokenizerBase,
     fixed_output_len: Optional[int] = None,
-) -> List[Tuple[str, int, int, None]]:
+) -> List[Tuple[str, int, int, Optional[List[int]]]]:
     # Load the dataset.
     with open(dataset_path, encoding='utf-8') as f:
         dataset = json.load(f)
@@ -121,7 +121,7 @@ def sample_sharegpt_requests(
         if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
-        filtered_dataset.append((prompt, prompt_len, output_len, None))
+        filtered_dataset.append((prompt, prompt_len, output_len, completion_token_ids))
 
     return filtered_dataset
 
@@ -388,7 +388,7 @@ async def benchmark(
     base_url: str,
     model_id: str,
     tokenizer: PreTrainedTokenizerBase,
-    input_requests: List[Tuple[str, int, int]],
+    input_requests: List[Tuple[str, int, int, Optional[List[int]]]],
     logprobs: Optional[int],
     best_of: int,
     request_rate: float,
@@ -406,6 +406,7 @@ async def benchmark(
     print("Starting initial single prompt test run...")
     test_prompt, test_prompt_len, test_output_len, test_mm_content = (
         input_requests[0])
+    test_mm_content = None
     if backend != "openai-chat" and test_mm_content is not None:
         # multi-modal benchmark is only available on OpenAI Chat backend.
         raise ValueError(
@@ -451,15 +452,16 @@ async def benchmark(
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
     async for request in get_request(input_requests, request_rate):
-        prompt, prompt_len, output_len, mm_content = request
+        prompt, prompt_len, output_len, completion_token_ids = request
         request_func_input = RequestFuncInput(model=model_id,
                                               prompt=prompt,
                                               api_url=api_url,
                                               prompt_len=prompt_len,
                                               output_len=output_len,
+                                              completion_token_ids=completion_token_ids,    # 加入原有输出
                                               logprobs=logprobs,
                                               best_of=best_of,
-                                              multi_modal_content=mm_content,
+                                              multi_modal_content=None,
                                               ignore_eos=ignore_eos)
         tasks.append(
             asyncio.create_task(

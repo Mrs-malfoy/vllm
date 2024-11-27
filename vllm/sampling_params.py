@@ -169,7 +169,7 @@ class SamplingParams(
             processor which only retains scores for the given token ids.
             Defaults to None.
     """
-
+    completion_token_ids: Optional[List[int]] = None    # 在参数里添加原有输出属性
     n: int = 1
     best_of: Optional[int] = None
     _real_n: Optional[int] = None

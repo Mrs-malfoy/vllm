@@ -281,6 +281,16 @@ class SequenceData(msgspec.Struct,
         self._mrope_position_delta = new_mrope_position_delta
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
+        # 添加逻辑，如果需要对齐原有输出，则直接覆盖原来的参数
+        sampling_params = self.sampling_params
+        if hasattr(sampling_params, 'completion_token_ids')
+            and sampling_params.completion_token_ids:
+            current_pos = len(self.data.get_output_token_ids())
+            if current_pos < len(sampling_params.completion_token_ids):
+                # 替换token_id
+                token_id = sampling_params.completion_token_ids[current_pos]
+                logprob = 0.0
+
         self._output_token_ids.append(token_id)
         self._new_appended_tokens.append(token_id)
         self._cached_all_token_ids.append(token_id)

@@ -21,6 +21,7 @@ class RequestFuncInput:
     api_url: str
     prompt_len: int
     output_len: int
+    completion_token_ids: Optional[List[int]] = None    # 加入原有输出
     model: str
     best_of: int = 1
     logprobs: Optional[int] = None
@@ -234,6 +235,7 @@ async def async_request_openai_completions(
         payload = {
             "model": request_func_input.model,
             "prompt": request_func_input.prompt,
+            "completion_token_ids": request_func_input.completion_token_ids,    # 添加客户端调用的参数
             "temperature": 0.0,
             "best_of": request_func_input.best_of,
             "max_tokens": request_func_input.output_len,
