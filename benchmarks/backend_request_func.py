@@ -21,12 +21,14 @@ class RequestFuncInput:
     api_url: str
     prompt_len: int
     output_len: int
-    completion_token_ids: Optional[List[int]] = None    # 加入原有输出
     model: str
     best_of: int = 1
     logprobs: Optional[int] = None
     multi_modal_content: Optional[dict] = None
     ignore_eos: bool = False
+    # python语法：默认参数不能出现在非默认参数前面！
+    completion_token_ids: Optional[List[int]] = None    # 加入原有输出
+    
 
 
 @dataclass
@@ -235,13 +237,13 @@ async def async_request_openai_completions(
         payload = {
             "model": request_func_input.model,
             "prompt": request_func_input.prompt,
-            "completion_token_ids": request_func_input.completion_token_ids,    # 添加客户端调用的参数
             "temperature": 0.0,
             "best_of": request_func_input.best_of,
             "max_tokens": request_func_input.output_len,
             "logprobs": request_func_input.logprobs,
             "stream": True,
             "ignore_eos": request_func_input.ignore_eos,
+            "completion_token_ids": request_func_input.completion_token_ids,    # 添加客户端调用的参数
         }
         headers = {
             "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
@@ -255,6 +257,7 @@ async def async_request_openai_completions(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
+            #url默认值是"/v1/completions"
             async with session.post(url=api_url, json=payload,
                                     headers=headers) as response:
                 if response.status == 200:
@@ -280,7 +283,7 @@ async def async_request_openai_completions(
                                     ttft = time.perf_counter() - st
                                     output.ttft = ttft
 
-                                # Decoding phase
+                                # Dec oding phase
                                 else:
                                     output.itl.append(timestamp -
                                                       most_recent_timestamp)

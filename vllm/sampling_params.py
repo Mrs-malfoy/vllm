@@ -213,6 +213,7 @@ class SamplingParams(
 
     @staticmethod
     def from_optional(
+        completion_token_ids: Optional[List[int]] = None,   #在这里定义
         n: Optional[int] = 1,
         best_of: Optional[int] = None,
         presence_penalty: Optional[float] = 0.0,
@@ -259,6 +260,7 @@ class SamplingParams(
             if repetition_penalty is None else repetition_penalty,
             temperature=1.0 if temperature is None else temperature,
             top_p=1.0 if top_p is None else top_p,
+            completion_token_ids=completion_token_ids,  #在这里赋值
             top_k=top_k,
             min_p=min_p,
             seed=seed,

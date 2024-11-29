@@ -509,6 +509,8 @@ class CompletionRequest(OpenAIBaseModel):
     top_p: Optional[float] = 1.0
     user: Optional[str] = None
 
+    completion_token_ids: Optional[List[int]] = None    #在这里定义
+
     # doc: begin-completion-sampling-params
     use_beam_search: bool = False
     top_k: int = -1
@@ -622,6 +624,7 @@ class CompletionRequest(OpenAIBaseModel):
             whitespace_pattern=self.guided_whitespace_pattern)
 
         return SamplingParams.from_optional(
+            completion_token_ids=self.completion_token_ids, #在这里赋值
             n=self.n,
             best_of=self.best_of,
             presence_penalty=self.presence_penalty,

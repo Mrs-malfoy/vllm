@@ -129,7 +129,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         default_max_tokens)
                 else:
                     sampling_params = request.to_sampling_params(
-                        default_max_tokens)
+                        default_max_tokens) # 在这里被赋值
 
                 request_id_item = f"{request_id}-{i}"
 

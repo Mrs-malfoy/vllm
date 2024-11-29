@@ -281,16 +281,6 @@ class SequenceData(msgspec.Struct,
         self._mrope_position_delta = new_mrope_position_delta
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
-        # 添加逻辑，如果需要对齐原有输出，则直接覆盖原来的参数
-        sampling_params = self.sampling_params
-        if hasattr(sampling_params, 'completion_token_ids')
-            and sampling_params.completion_token_ids:
-            current_pos = len(self.data.get_output_token_ids())
-            if current_pos < len(sampling_params.completion_token_ids):
-                # 替换token_id
-                token_id = sampling_params.completion_token_ids[current_pos]
-                logprob = 0.0
-
         self._output_token_ids.append(token_id)
         self._new_appended_tokens.append(token_id)
         self._cached_all_token_ids.append(token_id)
@@ -472,6 +462,8 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
+        #feat: 添加completion_token_ids
+        self.completion_token_ids: Optional[List[int]] = None
 
     @property
     def n_blocks(self) -> int:
@@ -587,8 +579,24 @@ class Sequence:
     def append_token_id(self, token_id: int, logprobs: Dict[int,
                                                             Logprob]) -> None:
         assert token_id in logprobs
+        # print(f"token_id:{token_id}")
+        # fix：上次添错地方了！
+        # 添加逻辑，如果需要对齐原有输出，则直接覆盖原来的参数
+        new_token_id = token_id
+        if (self.completion_token_ids):
+            current_pos = len(self.data.get_output_token_ids())
+            if current_pos < len(self.completion_token_ids):
+                # 替换token_id
+                new_token_id = self.completion_token_ids[current_pos]
+                # logprob = 0.0
+
+        # print(f"new_token_id:{new_token_id}")
+        # self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        if new_token_id not in logprobs:
+            logprobs[new_token_id] = Logprob(0.0)
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        self.data.append_token_id(new_token_id, logprobs[new_token_id].logprob)
+
 
     def get_len(self) -> int:
         return self.data.get_len()

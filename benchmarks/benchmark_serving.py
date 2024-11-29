@@ -89,16 +89,17 @@ def sample_sharegpt_requests(
     tokenizer: PreTrainedTokenizerBase,
     fixed_output_len: Optional[int] = None,
 ) -> List[Tuple[str, int, int, Optional[List[int]]]]:
-    # Load the dataset.
-    with open(dataset_path, encoding='utf-8') as f:
-        dataset = json.load(f)
-    # Filter out the conversations with less than 2 turns.
-    dataset = [data for data in dataset if len(data["conversations"]) >= 2]
-    # Only keep the first two turns of each conversation.
-    dataset = [(data["conversations"][0]["value"],
-                data["conversations"][1]["value"]) for data in dataset]
+    # 改写一下原有格式，打开JSONL文件并逐行读取
+    with open(dataset_path, 'r', encoding='utf-8') as f:
+        dataset = []
+        for line in f:
+            data = json.loads(line)  # 解析每一行的JSON
+            # 过滤出对话轮数大于等于2的记录
+            if len(data["conversation"]) >= 1:
+                # 只保留前两轮对话
+                dataset.append(data["conversation"][0])
 
-    # Shuffle the dataset.
+    # 打乱数据集
     random.shuffle(dataset)
 
     # Filter out sequences that are too long or too short
@@ -108,9 +109,11 @@ def sample_sharegpt_requests(
             break
 
         # Tokenize the prompts and completions.
-        prompt = dataset[i][0]
+        prompt = dataset[i]["human"]    # 根据实际数据集的格式修改
         prompt_token_ids = tokenizer(prompt).input_ids
-        completion = dataset[i][1]
+        # print(f"human:{prompt}")
+        # print(f"token_id:{prompt_token_ids}")
+        completion = dataset[i]["assistant"]    # 根据实际数据集的格式修改
         completion_token_ids = tokenizer(completion).input_ids
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
@@ -122,6 +125,10 @@ def sample_sharegpt_requests(
             # Prune too long sequences.
             continue
         filtered_dataset.append((prompt, prompt_len, output_len, completion_token_ids))
+
+    # token_ids = [3922, 110526, 27327, 109438, 28037, 57668, 1811, 220, 220, 679, 24, 8107, 24]
+    # tokens = tokenizer.decode(token_ids)
+    # print(f"Token ID: {token_ids}, \nToken: {tokens}")
 
     return filtered_dataset
 
@@ -329,6 +336,9 @@ def calculate_metrics(
             # serving backends instead of looking at len(outputs[i].itl) since
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
+            print(outputs[i].generated_text)
+            print(tokenizer(outputs[i].generated_text,
+                          add_special_tokens=False).input_ids)
             output_len = len(
                 tokenizer(outputs[i].generated_text,
                           add_special_tokens=False).input_ids)
@@ -398,6 +408,11 @@ async def benchmark(
     selected_percentiles: List[str],
     ignore_eos: bool,
 ):
+    #print(input_requests)
+    #token_ids = [109122, 109122, 88126, 118125, 37046, 1811, 38129, 17039, 31091, 125653, 9554, 697, 2344, 109589, 75320, 9554, 3222, 107585, 21043, 91837, 2485, 1129, 641, 12591, 418, 1190, 4748, 309, 18225, 285, 1351, 501, 6973, 29, 1811, 15225, 123133, 33091, 51107, 9554, 3222, 23897, 123133, 127442, 25580, 79982, 98220, 28190, 1811, 35056, 33563, 88126, 37767, 45163, 56438, 34226, 23226, 47585, 28037, 697, 2344, 105363, 27996, 16325, 91495, 24946, 53826, 697, 2344, 98220, 28190, 109127, 34048, 9554, 2118, 117238, 863, 85284, 23897, 125169, 127442, 3968, 1091, 90147, 115397, 121022, 90147, 117238, 125653, 107585, 113961, 19000, 104908, 9554, 3222, 17905, 123133, 25580, 79982, 98220, 28190, 1811]
+    #tokens = tokenizer.decode(token_ids)
+    #print(tokens)
+    #print(haha)
     if backend in ASYNC_REQUEST_FUNCS:
         request_func = ASYNC_REQUEST_FUNCS[backend]
     else:
