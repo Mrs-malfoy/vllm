@@ -739,34 +739,34 @@ class Scheduler:
                 seq_group,
                 self._get_num_lookahead_slots(is_prefill, enable_chunking))
             if alloc_status == AllocStatus.LATER:
-                remaining_audio_time = (
-                    seq_group.seqs[0].seq_duration - 
-                    (time.time() - seq_group.metrics.first_scheduled_time)
-                    if seq_group.metrics else float('inf')
-                )
+                # remaining_audio_time = (
+                #     seq_group.seqs[0].seq_duration - 
+                #     (time.time() - seq_group.metrics.first_scheduled_time)
+                #     if seq_group.metrics else float('inf')
+                # )
 
-                # 如果剩余时间小于阈值,尝试强制恢复
-                if remaining_audio_time < 1.0:  # 可配置的阈值
-                    print(seq_group.seqs[0].seq_duration)
-                    print( (time.time() - seq_group.metrics.first_scheduled_time))
-                    print("it's me! help!")
-                    success, scheduled_group, preempted_seqs = self._force_swap_in_by_preemption(
-                        seq_group,
-                        blocks_to_swap_in,
-                        blocks_to_swap_out,
-                        blocks_to_copy,
-                        budget,
-                        is_prefill,
-                        enable_chunking
-                    )
+                # # 如果剩余时间小于阈值,尝试强制恢复
+                # if remaining_audio_time < 1.0:  # 可配置的阈值
+                #     print(seq_group.seqs[0].seq_duration)
+                #     print( (time.time() - seq_group.metrics.first_scheduled_time))
+                #     print("it's me! help!")
+                #     success, scheduled_group, preempted_seqs = self._force_swap_in_by_preemption(
+                #         seq_group,
+                #         blocks_to_swap_in,
+                #         blocks_to_swap_out,
+                #         blocks_to_copy,
+                #         budget,
+                #         is_prefill,
+                #         enable_chunking
+                #     )
 
-                    # print("Q:are you success?")
-                    # print(success)
+                #     # print("Q:are you success?")
+                #     # print(success)
                     
-                    if success:
-                        swapped_queue.popleft()
-                        decode_seq_groups.append(scheduled_group)
-                        swapped_out.extend(preempted_seqs)  # 将被抢占的序列添加到swapped队列
+                #     if success:
+                #         swapped_queue.popleft()
+                #         decode_seq_groups.append(scheduled_group)
+                #         swapped_out.extend(preempted_seqs)  # 将被抢占的序列添加到swapped队列
                         
                 break  # 无论是否成功抢占,都退出循环
 
@@ -1345,13 +1345,17 @@ class Scheduler:
         if num_prefill_groups > 0:
             scheduled_seq_groups = prefills.seq_groups
             scheduled_seq_groups.extend(running_scheduled.decode_seq_groups)
-            scheduled_seq_groups.extend(swapped_in.decode_seq_groups)
         else:
-            scheduled_seq_groups = [
-                ScheduledSequenceGroup(seq_group=running_group,
-                                        token_chunk_size=1) 
-                for running_group in self.running
-                ]
+            scheduled_seq_groups = running_scheduled.decode_seq_groups
+        scheduled_seq_groups.extend(swapped_in.decode_seq_groups)
+            # scheduled_seq_groups = []
+            # scheduled_seq_groups.append(ScheduledSequenceGroup(seq_group=self.running[len(self.running)-1], token_chunk_size=1))
+            # scheduled_seq_groups = []
+            # for running_group in self.running:
+            #     try:
+            #         scheduled_seq_groups.append(ScheduledSequenceGroup(seq_group=running_group, token_chunk_size=1))
+            #     except Exception as e:
+            #         print(f"Error creating ScheduledSequenceGroup for {running_group}: {e}")
 
         blocks_to_copy = running_scheduled.blocks_to_copy
         blocks_to_copy.extend(swapped_in.blocks_to_copy)
