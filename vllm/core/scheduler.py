@@ -566,6 +566,16 @@ class Scheduler:
         preempted: List[SequenceGroup] = ret.preempted
         swapped_out: List[SequenceGroup] = ret.swapped_out
 
+        # 24/11/30 feat: 在running队列里也遵循，按剩余可播放时间排序,优先抢占剩余时间长的序列
+        self.running = deque(sorted(
+            self.running,
+            key=lambda x: (
+                x.seqs[0].seq_duration - (time.time() - x.metrics.first_scheduled_time) 
+                if x.metrics else 0
+            ),
+            # reverse=True
+        ))
+
         running_queue = self.running
         assert len(self._async_stopped) == 0
         while running_queue:
@@ -729,33 +739,34 @@ class Scheduler:
                 seq_group,
                 self._get_num_lookahead_slots(is_prefill, enable_chunking))
             if alloc_status == AllocStatus.LATER:
-                # remaining_audio_time = (
-                #     seq_group.seqs[0].seq_duration - 
-                #     (time.time() - seq_group.metrics.first_scheduled_time)
-                #     if seq_group.metrics else float('inf')
-                # )
+                remaining_audio_time = (
+                    seq_group.seqs[0].seq_duration - 
+                    (time.time() - seq_group.metrics.first_scheduled_time)
+                    if seq_group.metrics else float('inf')
+                )
 
-                # # 如果剩余时间小于阈值,尝试强制恢复
-                # if remaining_audio_time < 1.0:  # 可配置的阈值
-                #     print(seq_group.seqs[0].seq_duration)
-                #     print( (time.time() - seq_group.metrics.first_scheduled_time))
-                #     print("it's me! help!")
-                #     success, scheduled_group, preempted_seqs = self._force_swap_in_by_preemption(
-                #         seq_group,
-                #         blocks_to_swap_in,
-                #         blocks_to_swap_out,
-                #         budget,
-                #         is_prefill,
-                #         enable_chunking
-                #     )
+                # 如果剩余时间小于阈值,尝试强制恢复
+                if remaining_audio_time < 1.0:  # 可配置的阈值
+                    print(seq_group.seqs[0].seq_duration)
+                    print( (time.time() - seq_group.metrics.first_scheduled_time))
+                    print("it's me! help!")
+                    success, scheduled_group, preempted_seqs = self._force_swap_in_by_preemption(
+                        seq_group,
+                        blocks_to_swap_in,
+                        blocks_to_swap_out,
+                        blocks_to_copy,
+                        budget,
+                        is_prefill,
+                        enable_chunking
+                    )
 
-                #     # print("Q:are you success?")
-                #     # print(success)
+                    # print("Q:are you success?")
+                    # print(success)
                     
-                #     if success:
-                #         swapped_queue.popleft()
-                #         decode_seq_groups.append(scheduled_group)
-                #         swapped_out.extend(preempted_seqs)  # 将被抢占的序列添加到swapped队列
+                    if success:
+                        swapped_queue.popleft()
+                        decode_seq_groups.append(scheduled_group)
+                        swapped_out.extend(preempted_seqs)  # 将被抢占的序列添加到swapped队列
                         
                 break  # 无论是否成功抢占,都退出循环
 
@@ -1102,6 +1113,7 @@ class Scheduler:
         seq_group: SequenceGroup,
         blocks_to_swap_in: List[Tuple[int, int]],
         blocks_to_swap_out: List[Tuple[int, int]],
+        blocks_to_copy: List[Tuple[int, int]],
         budget: SchedulingBudget,
         is_prefill: bool,
         enable_chunking: bool,
@@ -1169,6 +1181,7 @@ class Scheduler:
                     return False, None, preempted_seqs
                     
                 self._swap_in(seq_group, blocks_to_swap_in)
+                self._append_slots(seq_group, blocks_to_copy, enable_chunking)
                 scheduled_group = ScheduledSequenceGroup(
                     seq_group, 
                     token_chunk_size=1
@@ -1176,7 +1189,7 @@ class Scheduler:
                 budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
                 budget.add_num_seqs(seq_group.request_id, num_new_seqs)
                 self.running = running_seqs #确认成功以后再给self.running重新赋值
-                
+
                 return True, scheduled_group, preempted_seqs
                 
         return False, None, preempted_seqs
@@ -1302,6 +1315,7 @@ class Scheduler:
         if len(prefills.seq_groups) > 0:
             self.running.extend([s.seq_group for s in prefills.seq_groups])
         
+        # 恢复running队列
         if len(prefills.seq_groups) != 0 or len(running_scheduled.preempted) + len(
             running_scheduled.swapped_out) != 0:
             self.running.extend(running_scheduled.decode_seq_groups_list)
@@ -1331,9 +1345,13 @@ class Scheduler:
         if num_prefill_groups > 0:
             scheduled_seq_groups = prefills.seq_groups
             scheduled_seq_groups.extend(running_scheduled.decode_seq_groups)
+            scheduled_seq_groups.extend(swapped_in.decode_seq_groups)
         else:
-            scheduled_seq_groups = running_scheduled.decode_seq_groups
-        scheduled_seq_groups.extend(swapped_in.decode_seq_groups)
+            scheduled_seq_groups = [
+                ScheduledSequenceGroup(seq_group=running_group,
+                                        token_chunk_size=1) 
+                for running_group in self.running
+                ]
 
         blocks_to_copy = running_scheduled.blocks_to_copy
         blocks_to_copy.extend(swapped_in.blocks_to_copy)
@@ -1345,16 +1363,16 @@ class Scheduler:
                              prefills.blocks_to_swap_out + swapped_in.blocks_to_swap_out)
         #all_swapped_out = running_scheduled.swapped_out + prefills.swapped_out
         
-        # print(f"running:{len(self.running)}")
-        # print(f"swapped:{len(self.swapped)}")
-        # print(f"waiting:{len(self.waiting)}")
-        
-        # print(f"running:{len(self.running)}")
-        # print(f"swapped:{len(self.swapped)}")
-        # print(f"waiting:{len(self.waiting)}")
-        # print(f"scheduled_seq_groups:{len(scheduled_seq_groups)}")
-        # print(f"swapped_in.decode_seq_groups:{swapped_in.decode_seq_groups}")
-        # print(f"running_scheduled.decode_seq_groups:{len(running_scheduled.decode_seq_groups)}")
+        print(f"running:{len(self.running)}")
+        print(f"swapped:{len(self.swapped)}")
+        print(f"waiting:{len(self.waiting)}")
+        print(f"scheduled_seq_groups:{len(scheduled_seq_groups)}")
+        print(f"num_prefill_groups:{(num_prefill_groups)}")
+        print(f"num_batched_tokens:{(budget.num_batched_tokens)}")
+        print(f"ignored_seq_groups:{len(ignored_seq_groups)}")
+        print(f"preempted:{(preempted)}")
+        print(f"swapped_in.decode_seq_groups:{swapped_in.decode_seq_groups}")
+        print(f"running_scheduled.decode_seq_groups:{len(running_scheduled.decode_seq_groups)}")
 
 
         return SchedulerOutputs(
