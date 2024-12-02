@@ -462,6 +462,8 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
+        #feat: 添加completion_token_ids
+        self.completion_token_ids: Optional[List[int]] = None
 
         
         #Estimated Speech Output Duration
@@ -585,8 +587,24 @@ class Sequence:
     def append_token_id(self, token_id: int, logprobs: Dict[int,
                                                             Logprob]) -> None:
         assert token_id in logprobs
+        # print(f"token_id:{token_id}")
+        # fix：上次添错地方了！
+        # 添加逻辑，如果需要对齐原有输出，则直接覆盖原来的参数
+        new_token_id = token_id
+        if (self.completion_token_ids):
+            current_pos = len(self.data.get_output_token_ids())
+            if current_pos < len(self.completion_token_ids):
+                # 替换token_id
+                new_token_id = self.completion_token_ids[current_pos]
+                # logprob = 0.0
+
+        # print(f"new_token_id:{new_token_id}")
+        # self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        if new_token_id not in logprobs:
+            logprobs[new_token_id] = Logprob(0.0)
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        self.data.append_token_id(new_token_id, logprobs[new_token_id].logprob)
+
 
         #self.seq_duration = 1.0
         # print(self.output_text)

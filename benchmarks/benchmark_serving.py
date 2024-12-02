@@ -81,6 +81,13 @@ class BenchmarkMetrics:
     median_e2el_ms: float
     std_e2el_ms: float
     percentiles_e2el_ms: List[Tuple[float, float]]
+    # 添加违约率相关指标
+    sla_violations: int                # 违约请求数
+    ttft_violations: int              # TTFT违约数
+    tbt_violations: int               # TBT违约数
+    violation_rate: float             # 总违约率
+    ttft_violation_rate: float        # TTFT违约率
+    tbt_violation_rate: float         # TBT违约率
 
 
 def sample_sharegpt_requests(
@@ -88,17 +95,18 @@ def sample_sharegpt_requests(
     num_requests: int,
     tokenizer: PreTrainedTokenizerBase,
     fixed_output_len: Optional[int] = None,
-) -> List[Tuple[str, int, int, None]]:
-    # Load the dataset.
-    with open(dataset_path, encoding='utf-8') as f:
-        dataset = json.load(f)
-    # Filter out the conversations with less than 2 turns.
-    dataset = [data for data in dataset if len(data["conversations"]) >= 2]
-    # Only keep the first two turns of each conversation.
-    dataset = [(data["conversations"][0]["value"],
-                data["conversations"][1]["value"]) for data in dataset]
+) -> List[Tuple[str, int, int, Optional[List[int]]]]:
+    # 改写一下原有格式，打开JSONL文件并逐行读取
+    with open(dataset_path, 'r', encoding='utf-8') as f:
+        dataset = []
+        for line in f:
+            data = json.loads(line)  # 解析每一行的JSON
+            # 过滤出对话轮数大于等于2的记录
+            if len(data["conversation"]) >= 1:
+                # 只保留前两轮对话
+                dataset.append(data["conversation"][0])
 
-    # Shuffle the dataset.
+    # 打乱数据集
     random.shuffle(dataset)
 
     # Filter out sequences that are too long or too short
@@ -108,9 +116,11 @@ def sample_sharegpt_requests(
             break
 
         # Tokenize the prompts and completions.
-        prompt = dataset[i][0]
+        prompt = dataset[i]["human"]    # 根据实际数据集的格式修改
         prompt_token_ids = tokenizer(prompt).input_ids
-        completion = dataset[i][1]
+        # print(f"human:{prompt}")
+        # print(f"token_id:{prompt_token_ids}")
+        completion = dataset[i]["assistant"]    # 根据实际数据集的格式修改
         completion_token_ids = tokenizer(completion).input_ids
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
@@ -121,7 +131,11 @@ def sample_sharegpt_requests(
         if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
-        filtered_dataset.append((prompt, prompt_len, output_len, None))
+        filtered_dataset.append((prompt, prompt_len, output_len, completion_token_ids))
+
+    # token_ids = [3922, 110526, 27327, 109438, 28037, 57668, 1811, 220, 220, 679, 24, 8107, 24]
+    # tokens = tokenizer.decode(token_ids)
+    # print(f"Token ID: {token_ids}, \nToken: {tokens}")
 
     return filtered_dataset
 
@@ -315,6 +329,8 @@ def calculate_metrics(
     tokenizer: PreTrainedTokenizerBase,
     selected_percentile_metrics: List[str],
     selected_percentiles: List[float],
+    ttft_threshold: float,
+    tbt_threshold: float,
 ) -> Tuple[BenchmarkMetrics, List[int]]:
     actual_output_lens: List[int] = []
     total_input = 0
@@ -323,12 +339,20 @@ def calculate_metrics(
     tpots: List[float] = []
     ttfts: List[float] = []
     e2els: List[float] = []
+
+    ttft_violations = 0
+    tbt_violations = 0
+    total_requests = len(outputs)
+
     for i in range(len(outputs)):
         if outputs[i].success:
             # We use the tokenizer to count the number of output tokens for all
             # serving backends instead of looking at len(outputs[i].itl) since
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
+            # print(outputs[i].generated_text)
+            # print(tokenizer(outputs[i].generated_text,
+                        #   add_special_tokens=False).input_ids)
             output_len = len(
                 tokenizer(outputs[i].generated_text,
                           add_special_tokens=False).input_ids)
@@ -341,8 +365,32 @@ def calculate_metrics(
             ttfts.append(outputs[i].ttft)
             e2els.append(outputs[i].latency)
             completed += 1
+            # 检查TTFT违约
+            if outputs[i].ttft > ttft_threshold:
+                ttft_violations += 1
+            
+            # 检查TBT违约
+            if len(outputs[i].itl) > 1:  # 至少有两个token才能计算间隔
+                for j in range(0, len(outputs[i].itl)):
+                    if outputs[i].itl[j] > tbt_threshold:
+                        tbt_violations += 1
+                        break  # 一个请求只计一次TBT违约
         else:
             actual_output_lens.append(0)
+    
+     # 计算违约率
+    total_violations = len([o for o in outputs if not o.success])  # 失败的请求
+    total_violations += len([o for o in outputs 
+                           if o.success and (
+                               o.ttft > ttft_threshold or 
+                               any(o.itl[i] > tbt_threshold 
+                                   for i in range(0, len(o.itl)))
+                           )])
+    
+    violation_rate = total_violations / total_requests
+    ttft_violation_rate = ttft_violations / total_requests
+    tbt_violation_rate = tbt_violations / total_requests
+    
 
     if completed == 0:
         warnings.warn(
@@ -350,6 +398,12 @@ def calculate_metrics(
             "on the benchmark arguments.",
             stacklevel=2)
     metrics = BenchmarkMetrics(
+        sla_violations=total_violations,
+        ttft_violations=ttft_violations,
+        tbt_violations=tbt_violations,
+        violation_rate=violation_rate,
+        ttft_violation_rate=ttft_violation_rate,
+        tbt_violation_rate=tbt_violation_rate,
         completed=completed,
         total_input=total_input,
         total_output=sum(actual_output_lens),
@@ -388,7 +442,7 @@ async def benchmark(
     base_url: str,
     model_id: str,
     tokenizer: PreTrainedTokenizerBase,
-    input_requests: List[Tuple[str, int, int]],
+    input_requests: List[Tuple[str, int, int, Optional[List[int]]]],
     logprobs: Optional[int],
     best_of: int,
     request_rate: float,
@@ -397,7 +451,14 @@ async def benchmark(
     selected_percentile_metrics: List[str],
     selected_percentiles: List[str],
     ignore_eos: bool,
+    ttft_threshold: float,
+    tbt_threshold: float,
 ):
+    #print(input_requests)
+    #token_ids = [109122, 109122, 88126, 118125, 37046, 1811, 38129, 17039, 31091, 125653, 9554, 697, 2344, 109589, 75320, 9554, 3222, 107585, 21043, 91837, 2485, 1129, 641, 12591, 418, 1190, 4748, 309, 18225, 285, 1351, 501, 6973, 29, 1811, 15225, 123133, 33091, 51107, 9554, 3222, 23897, 123133, 127442, 25580, 79982, 98220, 28190, 1811, 35056, 33563, 88126, 37767, 45163, 56438, 34226, 23226, 47585, 28037, 697, 2344, 105363, 27996, 16325, 91495, 24946, 53826, 697, 2344, 98220, 28190, 109127, 34048, 9554, 2118, 117238, 863, 85284, 23897, 125169, 127442, 3968, 1091, 90147, 115397, 121022, 90147, 117238, 125653, 107585, 113961, 19000, 104908, 9554, 3222, 17905, 123133, 25580, 79982, 98220, 28190, 1811]
+    #tokens = tokenizer.decode(token_ids)
+    #print(tokens)
+    #print(haha)
     if backend in ASYNC_REQUEST_FUNCS:
         request_func = ASYNC_REQUEST_FUNCS[backend]
     else:
@@ -406,6 +467,7 @@ async def benchmark(
     print("Starting initial single prompt test run...")
     test_prompt, test_prompt_len, test_output_len, test_mm_content = (
         input_requests[0])
+    test_mm_content = None
     if backend != "openai-chat" and test_mm_content is not None:
         # multi-modal benchmark is only available on OpenAI Chat backend.
         raise ValueError(
@@ -420,6 +482,8 @@ async def benchmark(
         best_of=best_of,
         multi_modal_content=test_mm_content,
         ignore_eos=ignore_eos,
+        ttft_threshold=ttft_threshold,
+        tbt_threshold=tbt_threshold,
     )
     test_output = await request_func(request_func_input=test_input)
     if not test_output.success:
@@ -439,7 +503,9 @@ async def benchmark(
                                          logprobs=logprobs,
                                          best_of=best_of,
                                          multi_modal_content=test_mm_content,
-                                         ignore_eos=ignore_eos)
+                                         ignore_eos=ignore_eos,
+                                         ttft_threshold=ttft_threshold,
+                                         tbt_threshold=tbt_threshold)
         profile_output = await request_func(request_func_input=profile_input)
         if profile_output.success:
             print("Profiler started")
@@ -451,16 +517,19 @@ async def benchmark(
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
     async for request in get_request(input_requests, request_rate):
-        prompt, prompt_len, output_len, mm_content = request
+        prompt, prompt_len, output_len, completion_token_ids = request
         request_func_input = RequestFuncInput(model=model_id,
                                               prompt=prompt,
                                               api_url=api_url,
                                               prompt_len=prompt_len,
                                               output_len=output_len,
+                                              completion_token_ids=completion_token_ids,    # 加入原有输出
                                               logprobs=logprobs,
                                               best_of=best_of,
-                                              multi_modal_content=mm_content,
-                                              ignore_eos=ignore_eos)
+                                              multi_modal_content=None,
+                                              ignore_eos=ignore_eos,
+                                              ttft_threshold=ttft_threshold,
+                                              tbt_threshold=tbt_threshold)
         tasks.append(
             asyncio.create_task(
                 request_func(request_func_input=request_func_input,
@@ -494,12 +563,18 @@ async def benchmark(
         tokenizer=tokenizer,
         selected_percentile_metrics=selected_percentile_metrics,
         selected_percentiles=selected_percentiles,
+        ttft_threshold=ttft_threshold,
+        tbt_threshold=tbt_threshold,
     )
 
     print("{s:{c}^{n}}".format(s=' Serving Benchmark Result ', n=50, c='='))
     print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):",
                                     benchmark_duration))
+    # 输出违约数和违约率
+    print("{:<40} {:<10}".format("sla_violations:", metrics.sla_violations))
+    print("{:<40} {:<10.2f}".format("violation_rate:", metrics.violation_rate))
+
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
     print("{:<40} {:<10}".format("Total generated tokens:",
                                  metrics.total_output))
@@ -573,6 +648,9 @@ def main(args: argparse.Namespace):
     print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
+
+    ttft_threshold = args.ttft_threshold
+    tbt_threshold = args.tbt_threshold
 
     backend = args.backend
     model_id = args.model
@@ -680,6 +758,8 @@ def main(args: argparse.Namespace):
                 float(p) for p in args.metric_percentiles.split(",")
             ],
             ignore_eos=args.ignore_eos,
+            ttft_threshold=ttft_threshold,
+            tbt_threshold=tbt_threshold,
         ))
 
     # Save config and results to json
@@ -878,6 +958,18 @@ if __name__ == "__main__":
         "To report 25-th, 50-th, and 75-th percentiles, use \"25,50,75\". "
         "Default value is \"99\". "
         "Use \"--percentile-metrics\" to select metrics.",
+    )
+    parser.add_argument(
+        "--ttft-threshold",
+        type=float,
+        default=1.0,
+        help="TTFT threshold in seconds. Requests exceeding this are counted as violations.",
+    )
+    parser.add_argument(
+        "--tbt-threshold",
+        type=float,
+        default=0.1,
+        help="TBT (Time Between Tokens) threshold in seconds. Token intervals exceeding this are counted as violations.",
     )
 
     # group for dataset specific arguments

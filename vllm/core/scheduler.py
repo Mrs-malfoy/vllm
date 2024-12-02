@@ -1367,16 +1367,16 @@ class Scheduler:
                              prefills.blocks_to_swap_out + swapped_in.blocks_to_swap_out)
         #all_swapped_out = running_scheduled.swapped_out + prefills.swapped_out
         
-        print(f"running:{len(self.running)}")
-        print(f"swapped:{len(self.swapped)}")
-        print(f"waiting:{len(self.waiting)}")
-        print(f"scheduled_seq_groups:{len(scheduled_seq_groups)}")
-        print(f"num_prefill_groups:{(num_prefill_groups)}")
-        print(f"num_batched_tokens:{(budget.num_batched_tokens)}")
-        print(f"ignored_seq_groups:{len(ignored_seq_groups)}")
-        print(f"preempted:{(preempted)}")
-        print(f"swapped_in.decode_seq_groups:{swapped_in.decode_seq_groups}")
-        print(f"running_scheduled.decode_seq_groups:{len(running_scheduled.decode_seq_groups)}")
+        # print(f"running:{len(self.running)}")
+        # print(f"swapped:{len(self.swapped)}")
+        # print(f"waiting:{len(self.waiting)}")
+        # print(f"scheduled_seq_groups:{len(scheduled_seq_groups)}")
+        # print(f"num_prefill_groups:{(num_prefill_groups)}")
+        # print(f"num_batched_tokens:{(budget.num_batched_tokens)}")
+        # print(f"ignored_seq_groups:{len(ignored_seq_groups)}")
+        # print(f"preempted:{(preempted)}")
+        # print(f"swapped_in.decode_seq_groups:{swapped_in.decode_seq_groups}")
+        # print(f"running_scheduled.decode_seq_groups:{len(running_scheduled.decode_seq_groups)}")
 
 
         return SchedulerOutputs(
