@@ -435,6 +435,8 @@ class Scheduler:
             
         current_time = time.time()
         wait_time = current_time - seq_group.arrival_time
+
+        logger.info(f"wait_time:{wait_time}, self.max_wait_time:{self.max_wait_time}")
         return wait_time > self.max_wait_time
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
@@ -954,6 +956,9 @@ class Scheduler:
         Returns:
             SchedulerPrefillOutputs.
         """
+
+        # logger.info("waiting queue begin")
+
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []
         blocks_to_swap_out: List[Tuple[int, int]] = []
@@ -963,6 +968,7 @@ class Scheduler:
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
         while self._passed_delay(time.time()) and waiting_queue:
+            
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
@@ -1007,6 +1013,7 @@ class Scheduler:
                 continue
 
             if can_allocate == AllocStatus.LATER:
+                logger.info("LATER begin")
                 # 只对LATER状态检查是否需要强制调度
                 if self._should_force_schedule(seq_group, can_allocate):
                     logger.info(
@@ -1209,7 +1216,7 @@ class Scheduler:
             bool: 是否成功执行抢占
         """    
         # 按剩余可播放时间排序,优先抢占剩余时间长的序列
-        running_seqs = deque(sorted(
+        self.running = deque(sorted(
             self.running,
             key=lambda x: (
                 x.seqs[0].seq_duration - (time.time() - x.metrics.first_scheduled_time) 
@@ -1218,7 +1225,7 @@ class Scheduler:
             reverse=True
         ))
         # print(f"running: {running_seqs}")
-        
+        running_seqs = deque(self.running)
         
         preempted_seqs = []
         
@@ -1227,11 +1234,10 @@ class Scheduler:
             # 执行抢占
             self._preempt(victim, blocks_to_swap_out)
             preempted_seqs.append(victim)
-            running_seqs.popleft()
+            self.running.popleft()
             
             # 检查当前资源是否足够
             if self.block_manager.can_allocate(waiting_seq) == AllocStatus.OK:
-                self.running = deque(running_seqs)
                 return True, preempted_seqs  # 返回成功状态和被抢占的序列
                 
         # 如果抢占所有序列后仍无法分配,则恢复抢占的序列
