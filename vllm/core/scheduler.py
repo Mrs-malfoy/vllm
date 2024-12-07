@@ -1026,6 +1026,10 @@ class Scheduler:
                     if (num_new_tokens == 0
                             or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                     num_new_seqs=num_new_seqs)):
+                        logger.warning("not have enough budget to prefill")
+                        logger.warning(
+                            f"{seq_group.request_id} has waited for {time.time() - seq_group.arrival_time:.2f}s)"
+                        )
                         break
 
                     success, preempted = self._force_preempt_for_waiting_seq(
@@ -1071,6 +1075,10 @@ class Scheduler:
             if (num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
+                logger.warning("not have enough budget to prefill")
+                logger.warning(
+                    f"{seq_group.request_id} has waited for {time.time() - seq_group.arrival_time:.2f}s)"
+                )
                 break
 
             # Can schedule this request.
@@ -1102,6 +1110,13 @@ class Scheduler:
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
+        for seq_group in waiting_queue:
+            logger.warning(
+                        f"this request not be prefilled : {seq_group.request_id} "
+                        f"(waited for {time.time() - seq_group.arrival_time:.2f}s)"
+                    )
+        # if len(waiting_queue) == 0:
+        #     logger.warning("this step has no request left~")
         # Queue requests that couldn't be scheduled.
         waiting_queue.extendleft(leftover_waiting_sequences)
         if len(seq_groups) > 0:
@@ -1256,6 +1271,7 @@ class Scheduler:
         decodes. If there's a pressure on GPU memory, decode requests can
         be swapped or preempted.
         """
+        # logger.info("one step begin")
         flag = 0
         # Include running requests to the budget.
         budget = SchedulingBudget(
