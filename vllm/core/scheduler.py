@@ -436,7 +436,6 @@ class Scheduler:
         current_time = time.time()
         wait_time = current_time - seq_group.arrival_time
 
-        logger.info(f"wait_time:{wait_time}, self.max_wait_time:{self.max_wait_time}")
         return wait_time > self.max_wait_time
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
@@ -709,7 +708,6 @@ class Scheduler:
         Returns:
             SchedulerSwappedInOutputs.
         """
-
         # print("haha, please swap me!")
         # Blocks that need to be swapped or copied before model execution.
         blocks_to_swap_in: List[Tuple[int, int]] = []
@@ -957,7 +955,6 @@ class Scheduler:
             SchedulerPrefillOutputs.
         """
 
-        # logger.info("waiting queue begin")
 
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []
@@ -1026,10 +1023,6 @@ class Scheduler:
                     if (num_new_tokens == 0
                             or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                     num_new_seqs=num_new_seqs)):
-                        logger.warning("not have enough budget to prefill")
-                        logger.warning(
-                            f"{seq_group.request_id} has waited for {time.time() - seq_group.arrival_time:.2f}s)"
-                        )
                         break
 
                     success, preempted = self._force_preempt_for_waiting_seq(
@@ -1075,10 +1068,6 @@ class Scheduler:
             if (num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
-                logger.warning("not have enough budget to prefill")
-                logger.warning(
-                    f"{seq_group.request_id} has waited for {time.time() - seq_group.arrival_time:.2f}s)"
-                )
                 break
 
             # Can schedule this request.
@@ -1110,11 +1099,7 @@ class Scheduler:
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
-        for seq_group in waiting_queue:
-            logger.warning(
-                        f"this request not be prefilled : {seq_group.request_id} "
-                        f"(waited for {time.time() - seq_group.arrival_time:.2f}s)"
-                    )
+
         # if len(waiting_queue) == 0:
         #     logger.warning("this step has no request left~")
         # Queue requests that couldn't be scheduled.
@@ -1245,7 +1230,10 @@ class Scheduler:
         preempted_seqs = []
         
         for victim in running_seqs:
-            print(f"目前剩余时间最多的序列有seq_duration:{victim.seqs[0].seq_duration}")
+            logger.info(f"目前剩余时间最多的序列有seq_duration:{victim.seqs[0].seq_duration}\n"
+                            f"它的completion_token_ids长度为:{len(victim.seqs[0].completion_token_ids)}\n"
+                            f"它的output_text为:{victim.seqs[0].output_text}"
+                        )
             # 执行抢占
             self._preempt(victim, blocks_to_swap_out)
             preempted_seqs.append(victim)
@@ -1271,7 +1259,6 @@ class Scheduler:
         decodes. If there's a pressure on GPU memory, decode requests can
         be swapped or preempted.
         """
-        # logger.info("one step begin")
         flag = 0
         # Include running requests to the budget.
         budget = SchedulingBudget(
@@ -1293,7 +1280,7 @@ class Scheduler:
         swapped_in = SchedulerSwappedInOutputs.create_empty()
 
         # If any requests are swapped, prioritized swapped requests.
-        if not self.swapped:
+        if not self.swapped or self.waiting and (time.time() - self.waiting[0].arrival_time > self.max_wait_time):
             prefills = self._schedule_prefills(budget,
                                                curr_loras,
                                                enable_chunking=False)

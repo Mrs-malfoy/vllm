@@ -133,6 +133,10 @@ def sample_sharegpt_requests(
             continue
         filtered_dataset.append((prompt, prompt_len, output_len, completion_token_ids))
 
+    output_lengths = [item[2] for item in filtered_dataset]
+    output_lengths.sort()
+    print(output_lengths)
+
     # token_ids = [3922, 110526, 27327, 109438, 28037, 57668, 1811, 220, 220, 679, 24, 8107, 24]
     # tokens = tokenizer.decode(token_ids)
     # print(f"Token ID: {token_ids}, \nToken: {tokens}")
