@@ -30,6 +30,7 @@ class RequestFuncInput:
 
 @dataclass
 class RequestFuncOutput:
+    interrupted: bool = False
     generated_text: str = ""
     success: bool = False
     latency: float = 0.0
@@ -256,6 +257,8 @@ async def async_request_openai_completions(
             async with session.post(url=api_url, json=payload,
                                     headers=headers) as response:
                 if response.status == 200:
+                    # print("success")
+                    # print(response.content)
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
                         if not chunk_bytes:
@@ -267,7 +270,9 @@ async def async_request_openai_completions(
                             latency = time.perf_counter() - st
                         else:
                             data = json.loads(chunk)
-
+                            # print(data)
+                            if data["interrupted"]:
+                                output.interrupted = True
                             # NOTE: Some completion API might have a last
                             # usage summary response without a token so we
                             # want to check a token was generated

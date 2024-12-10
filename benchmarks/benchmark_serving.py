@@ -57,6 +57,7 @@ except ImportError:
 @dataclass
 class BenchmarkMetrics:
     completed: int
+    interrupted: int
     total_input: int
     total_output: int
     request_throughput: float
@@ -319,6 +320,7 @@ def calculate_metrics(
     actual_output_lens: List[int] = []
     total_input = 0
     completed = 0
+    interrupted = 0
     itls: List[float] = []
     tpots: List[float] = []
     ttfts: List[float] = []
@@ -329,6 +331,8 @@ def calculate_metrics(
             # serving backends instead of looking at len(outputs[i].itl) since
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
+            if outputs[i].interrupted:
+                interrupted += 1
             output_len = len(
                 tokenizer(outputs[i].generated_text,
                           add_special_tokens=False).input_ids)
@@ -351,6 +355,7 @@ def calculate_metrics(
             stacklevel=2)
     metrics = BenchmarkMetrics(
         completed=completed,
+        interrupted=interrupted,
         total_input=total_input,
         total_output=sum(actual_output_lens),
         request_throughput=completed / dur_s,
@@ -498,6 +503,8 @@ async def benchmark(
 
     print("{s:{c}^{n}}".format(s=' Serving Benchmark Result ', n=50, c='='))
     print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
+    print("{:<40} {:<10.2f}".format("Interrupted rate(%):",
+                                    float(metrics.interrupted) / metrics.completed * 100))
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):",
                                     benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))

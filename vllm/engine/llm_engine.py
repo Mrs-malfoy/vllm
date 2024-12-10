@@ -859,6 +859,7 @@ class LLMEngine:
         sampling_params.update_from_generation_config(
             self.generation_config_fields, seq.eos_token_id)
 
+        seq.arrival_time = arrival_time # 给单个sequence也记录这个属性
         # Create the sequence group.
         seq_group = SequenceGroup(
             request_id=request_id,
