@@ -1,3 +1,4 @@
+import re
 import json
 import os
 import sys
@@ -35,10 +36,12 @@ class RequestFuncInput:
 
 @dataclass
 class RequestFuncOutput:
+    interrupted: bool = False
     generated_text: str = ""
     success: bool = False
     latency: float = 0.0
     ttft: float = 0.0  # Time to first token
+    ttfs: float = 0.0  # Time to first speech
     itl: List[float] = field(
         default_factory=list)  # List of inter-token latencies
     prompt_len: int = 0
@@ -256,6 +259,7 @@ async def async_request_openai_completions(
 
         generated_text = ""
         ttft = 0.0
+        ttfs = 0.0 # feat: 添加time to first speech属性
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
@@ -263,6 +267,8 @@ async def async_request_openai_completions(
             async with session.post(url=api_url, json=payload,
                                     headers=headers) as response:
                 if response.status == 200:
+                    # print("success")
+                    # print(response.content)
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
                         if not chunk_bytes:
@@ -274,16 +280,24 @@ async def async_request_openai_completions(
                             latency = time.perf_counter() - st
                         else:
                             data = json.loads(chunk)
-
+                            # print(data)
+                            if data["interrupted"]:
+                                output.interrupted = True
                             # NOTE: Some completion API might have a last
                             # usage summary response without a token so we
                             # want to check a token was generated
                             if data["choices"][0]["text"]:
+                                text = data["choices"][0]["text"]
+                                has_punct = bool(re.search('[,!?:;。，！？；：]', text))
                                 timestamp = time.perf_counter()
                                 # First token
                                 if ttft == 0.0:
                                     ttft = time.perf_counter() - st
                                     output.ttft = ttft
+                                
+                                if ttfs == 0.0 and has_punct:
+                                    ttfs = time.perf_counter() - st
+                                    output.ttfs = ttfs
 
                                 # Dec oding phase
                                 else:

@@ -862,6 +862,7 @@ class LLMEngine:
         # feat: 通过参数更新sequence的属性
         if sampling_params.completion_token_ids:
             seq.completion_token_ids = sampling_params.completion_token_ids
+        seq.arrival_time = arrival_time # 给单个sequence也记录这个属性
         # Create the sequence group.
         seq_group = SequenceGroup(
             request_id=request_id,
