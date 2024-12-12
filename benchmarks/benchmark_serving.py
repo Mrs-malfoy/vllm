@@ -57,11 +57,16 @@ except ImportError:
 @dataclass
 class BenchmarkMetrics:
     completed: int
+    interrupted: int
     total_input: int
     total_output: int
     request_throughput: float
     output_throughput: float
     total_token_throughput: float
+    mean_ttfs_ms: float
+    median_ttfs_ms: float
+    std_ttfs_ms: float
+    percentiles_ttfs_ms: List[Tuple[float, float]]
     mean_ttft_ms: float
     median_ttft_ms: float
     std_ttft_ms: float
@@ -326,19 +331,22 @@ def calculate_metrics(
     actual_output_lens: List[int] = []
     total_input = 0
     completed = 0
+    interrupted = 0
     itls: List[float] = []
     tpots: List[float] = []
     ttfts: List[float] = []
     e2els: List[float] = []
+    ttfss: List[float] = [] # feat: 添加属性
     for i in range(len(outputs)):
         if outputs[i].success:
             # We use the tokenizer to count the number of output tokens for all
             # serving backends instead of looking at len(outputs[i].itl) since
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
-            # print(outputs[i].generated_text)
-            # print(tokenizer(outputs[i].generated_text,
-#                          add_special_tokens=False).input_ids)
+
+            if outputs[i].interrupted:
+                interrupted += 1
+
             output_len = len(
                 tokenizer(outputs[i].generated_text,
                           add_special_tokens=False).input_ids)
@@ -350,6 +358,7 @@ def calculate_metrics(
             itls += outputs[i].itl
             ttfts.append(outputs[i].ttft)
             e2els.append(outputs[i].latency)
+            ttfss.append(outputs[i].ttfs)
             completed += 1
         else:
             actual_output_lens.append(0)
@@ -361,11 +370,18 @@ def calculate_metrics(
             stacklevel=2)
     metrics = BenchmarkMetrics(
         completed=completed,
+        interrupted=interrupted,
         total_input=total_input,
         total_output=sum(actual_output_lens),
         request_throughput=completed / dur_s,
         output_throughput=sum(actual_output_lens) / dur_s,
         total_token_throughput=(total_input + sum(actual_output_lens)) / dur_s,
+        mean_ttfs_ms=np.mean(ttfss or 0) *
+        1000,  # ttfss is empty if streaming is not supported by backend
+        std_ttfs_ms=np.std(ttfss or 0) * 1000,
+        median_ttfs_ms=np.median(ttfss or 0) * 1000,
+        percentiles_ttfs_ms=[(p, np.percentile(ttfss or 0, p) * 1000)
+                             for p in selected_percentiles],
         mean_ttft_ms=np.mean(ttfts or 0) *
         1000,  # ttfts is empty if streaming is not supported by backend
         std_ttft_ms=np.std(ttfts or 0) * 1000,
@@ -515,6 +531,8 @@ async def benchmark(
 
     print("{s:{c}^{n}}".format(s=' Serving Benchmark Result ', n=50, c='='))
     print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
+    print("{:<40} {:<10.2f}".format("Interrupted rate(%):",
+                                    float(metrics.interrupted) / metrics.completed * 100))
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):",
                                     benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
@@ -537,6 +555,7 @@ async def benchmark(
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
         "output_lens": actual_output_lens,
+        "ttfss": [output.ttfs for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
@@ -575,6 +594,7 @@ async def benchmark(
                                             value))
             result[f"p{p_word}_{metric_attribute_name}_ms"] = value
 
+    process_one_metric("ttfs", "TTFS", "Time to First Speech")
     process_one_metric("ttft", "TTFT", "Time to First Token")
     process_one_metric("tpot", "TPOT",
                        "Time per Output Token (excl. 1st token)")
@@ -882,11 +902,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--percentile-metrics",
         type=str,
-        default="ttft,tpot,itl",
+        default="ttfs,ttft,tpot,itl",
         help="Comma-seperated list of selected metrics to report percentils. "
         "This argument specifies the metrics to report percentiles. "
         "Allowed metric names are \"ttft\", \"tpot\", \"itl\", \"e2el\". "
-        "Default value is \"ttft,tpot,itl\".")
+        "Default value is \"ttfs,ttft,tpot,itl\".")
     parser.add_argument(
         "--metric-percentiles",
         type=str,
