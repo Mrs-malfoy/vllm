@@ -6,6 +6,8 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
+from typing import Tuple
+
 
 import aiohttp
 import huggingface_hub.constants
@@ -23,8 +25,6 @@ class RequestFuncInput:
     prompt_len: int
     output_len: int
     model: str
-    ttft_threshold: float
-    tbt_threshold: float
     best_of: int = 1
     logprobs: Optional[int] = None
     multi_modal_content: Optional[dict] = None
@@ -36,12 +36,14 @@ class RequestFuncInput:
 
 @dataclass
 class RequestFuncOutput:
-    interrupted: bool = False
+    interrupted: Tuple[bool, float] = (False, 0.0)
     generated_text: str = ""
     success: bool = False
     latency: float = 0.0
     ttft: float = 0.0  # Time to first token
     ttfs: float = 0.0  # Time to first speech
+    fsl: int = 0  # First sentence length
+    fst: float = 0.0  # First sentence time
     itl: List[float] = field(
         default_factory=list)  # List of inter-token latencies
     prompt_len: int = 0
@@ -260,6 +262,8 @@ async def async_request_openai_completions(
         generated_text = ""
         ttft = 0.0
         ttfs = 0.0 # feat: 添加time to first speech属性
+        fsl = 0
+        fst = 0.0
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
@@ -281,8 +285,8 @@ async def async_request_openai_completions(
                         else:
                             data = json.loads(chunk)
                             # print(data)
-                            if data["interrupted"]:
-                                output.interrupted = True
+                            if data["interrupted"][0]:
+                                output.interrupted = data["interrupted"]
                             # NOTE: Some completion API might have a last
                             # usage summary response without a token so we
                             # want to check a token was generated
@@ -295,9 +299,15 @@ async def async_request_openai_completions(
                                     ttft = time.perf_counter() - st
                                     output.ttft = ttft
                                 
-                                if ttfs == 0.0 and has_punct:
-                                    ttfs = time.perf_counter() - st
-                                    output.ttfs = ttfs
+                                if ttfs == 0.0:
+                                    if has_punct:
+                                        ttfs = time.perf_counter() - st
+                                        fst = ttfs - ttft
+                                        output.ttfs = ttfs
+                                        output.fsl = fsl
+                                        output.fst = fst
+                                    else:
+                                        fsl += 1
 
                                 # Dec oding phase
                                 else:

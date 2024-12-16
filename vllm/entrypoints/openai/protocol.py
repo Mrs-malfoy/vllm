@@ -3,6 +3,7 @@
 import time
 from argparse import Namespace
 from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Tuple
 
 import torch
 from openai.types.chat import ChatCompletionContentPartParam
@@ -748,7 +749,7 @@ class CompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{random_uuid()}")
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
-    interrupted: bool
+    interrupted: Tuple[bool, float]
     model: str
     choices: List[CompletionResponseChoice]
     usage: UsageInfo
@@ -773,7 +774,7 @@ class CompletionStreamResponse(OpenAIBaseModel):
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
     # feat: 添加属性
-    interrupted: bool
+    interrupted: Tuple[bool, float]
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)

@@ -86,13 +86,6 @@ class BenchmarkMetrics:
     median_e2el_ms: float
     std_e2el_ms: float
     percentiles_e2el_ms: List[Tuple[float, float]]
-    # 添加违约率相关指标
-    sla_violations: int                # 违约请求数
-    ttft_violations: int              # TTFT违约数
-    tbt_violations: int               # TBT违约数
-    violation_rate: float             # 总违约率
-    ttft_violation_rate: float        # TTFT违约率
-    tbt_violation_rate: float         # TBT违约率
 
 
 def sample_sharegpt_requests(
@@ -137,10 +130,6 @@ def sample_sharegpt_requests(
             # Prune too long sequences.
             continue
         filtered_dataset.append((prompt, prompt_len, output_len, completion_token_ids))
-
-    output_lengths = [item[2] for item in filtered_dataset]
-    output_lengths.sort()
-    # print(output_lengths)
 
     # token_ids = [3922, 110526, 27327, 109438, 28037, 57668, 1811, 220, 220, 679, 24, 8107, 24]
     # tokens = tokenizer.decode(token_ids)
@@ -338,8 +327,6 @@ def calculate_metrics(
     tokenizer: PreTrainedTokenizerBase,
     selected_percentile_metrics: List[str],
     selected_percentiles: List[float],
-    ttft_threshold: float,
-    tbt_threshold: float,
 ) -> Tuple[BenchmarkMetrics, List[int]]:
     actual_output_lens: List[int] = []
     total_input = 0
@@ -349,20 +336,20 @@ def calculate_metrics(
     tpots: List[float] = []
     ttfts: List[float] = []
     e2els: List[float] = []
-
-    ttft_violations = 0
-    tbt_violations = 0
-    total_requests = len(outputs)
-
     ttfss: List[float] = [] # feat: 添加属性
+    fsls: List[int] = []
+    fsts: List[int] = []
+    fit: List[float] = [] # first interrupted time
     for i in range(len(outputs)):
         if outputs[i].success:
             # We use the tokenizer to count the number of output tokens for all
             # serving backends instead of looking at len(outputs[i].itl) since
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
-            if outputs[i].interrupted:
+
+            if outputs[i].interrupted[0]:
                 interrupted += 1
+
             output_len = len(
                 tokenizer(outputs[i].generated_text,
                           add_special_tokens=False).input_ids)
@@ -375,33 +362,12 @@ def calculate_metrics(
             ttfts.append(outputs[i].ttft)
             e2els.append(outputs[i].latency)
             ttfss.append(outputs[i].ttfs)
+            fsls.append(outputs[i].fsl)
+            fsts.append(outputs[i].fst)
+            fit.append(outputs[i].interrupted[1])
             completed += 1
-            # 检查TTFT违约
-            if outputs[i].ttft > ttft_threshold:
-                ttft_violations += 1
-            
-            # 检查TBT违约
-            if len(outputs[i].itl) > 1:  # 至少有两个token才能计算间隔
-                for j in range(0, len(outputs[i].itl)):
-                    if outputs[i].itl[j] > tbt_threshold:
-                        tbt_violations += 1
-                        break  # 一个请求只计一次TBT违约
         else:
             actual_output_lens.append(0)
-    
-     # 计算违约率
-    total_violations = len([o for o in outputs if not o.success])  # 失败的请求
-    total_violations += len([o for o in outputs 
-                           if o.success and (
-                               o.ttft > ttft_threshold or 
-                               any(o.itl[i] > tbt_threshold 
-                                   for i in range(0, len(o.itl)))
-                           )])
-    
-    violation_rate = total_violations / total_requests
-    ttft_violation_rate = ttft_violations / total_requests
-    tbt_violation_rate = tbt_violations / total_requests
-    
 
     if completed == 0:
         warnings.warn(
@@ -409,12 +375,6 @@ def calculate_metrics(
             "on the benchmark arguments.",
             stacklevel=2)
     metrics = BenchmarkMetrics(
-        sla_violations=total_violations,
-        ttft_violations=ttft_violations,
-        tbt_violations=tbt_violations,
-        violation_rate=violation_rate,
-        ttft_violation_rate=ttft_violation_rate,
-        tbt_violation_rate=tbt_violation_rate,
         completed=completed,
         interrupted=interrupted,
         total_input=total_input,
@@ -469,8 +429,6 @@ async def benchmark(
     selected_percentile_metrics: List[str],
     selected_percentiles: List[str],
     ignore_eos: bool,
-    ttft_threshold: float,
-    tbt_threshold: float,
 ):
     #print(input_requests)
     #token_ids = [109122, 109122, 88126, 118125, 37046, 1811, 38129, 17039, 31091, 125653, 9554, 697, 2344, 109589, 75320, 9554, 3222, 107585, 21043, 91837, 2485, 1129, 641, 12591, 418, 1190, 4748, 309, 18225, 285, 1351, 501, 6973, 29, 1811, 15225, 123133, 33091, 51107, 9554, 3222, 23897, 123133, 127442, 25580, 79982, 98220, 28190, 1811, 35056, 33563, 88126, 37767, 45163, 56438, 34226, 23226, 47585, 28037, 697, 2344, 105363, 27996, 16325, 91495, 24946, 53826, 697, 2344, 98220, 28190, 109127, 34048, 9554, 2118, 117238, 863, 85284, 23897, 125169, 127442, 3968, 1091, 90147, 115397, 121022, 90147, 117238, 125653, 107585, 113961, 19000, 104908, 9554, 3222, 17905, 123133, 25580, 79982, 98220, 28190, 1811]
@@ -500,8 +458,6 @@ async def benchmark(
         best_of=best_of,
         multi_modal_content=test_mm_content,
         ignore_eos=ignore_eos,
-        ttft_threshold=ttft_threshold,
-        tbt_threshold=tbt_threshold,
     )
     test_output = await request_func(request_func_input=test_input)
     if not test_output.success:
@@ -521,9 +477,7 @@ async def benchmark(
                                          logprobs=logprobs,
                                          best_of=best_of,
                                          multi_modal_content=test_mm_content,
-                                         ignore_eos=ignore_eos,
-                                         ttft_threshold=ttft_threshold,
-                                         tbt_threshold=tbt_threshold)
+                                         ignore_eos=ignore_eos)
         profile_output = await request_func(request_func_input=profile_input)
         if profile_output.success:
             print("Profiler started")
@@ -545,9 +499,7 @@ async def benchmark(
                                               logprobs=logprobs,
                                               best_of=best_of,
                                               multi_modal_content=None,
-                                              ignore_eos=ignore_eos,
-                                              ttft_threshold=ttft_threshold,
-                                              tbt_threshold=tbt_threshold)
+                                              ignore_eos=ignore_eos)
         tasks.append(
             asyncio.create_task(
                 request_func(request_func_input=request_func_input,
@@ -581,8 +533,6 @@ async def benchmark(
         tokenizer=tokenizer,
         selected_percentile_metrics=selected_percentile_metrics,
         selected_percentiles=selected_percentiles,
-        ttft_threshold=ttft_threshold,
-        tbt_threshold=tbt_threshold,
     )
 
     print("{s:{c}^{n}}".format(s=' Serving Benchmark Result ', n=50, c='='))
@@ -591,10 +541,6 @@ async def benchmark(
                                     float(metrics.interrupted) / metrics.completed * 100))
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):",
                                     benchmark_duration))
-    # 输出违约数和违约率
-    print("{:<40} {:<10}".format("sla_violations:", metrics.sla_violations))
-    print("{:<40} {:<10.2f}".format("violation_rate:", metrics.violation_rate))
-
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
     print("{:<40} {:<10}".format("Total generated tokens:",
                                  metrics.total_output))
@@ -615,9 +561,12 @@ async def benchmark(
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
         "output_lens": actual_output_lens,
+        "fsls": [output.fsl for output in outputs], #添加这两个属性
+        "fsts": [output.fst for output in outputs], #计算第一句话的平均token数和decode速度
         "ttfss": [output.ttfs for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
+        "fit": [output.interrupted[1] for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
         "errors": [output.error for output in outputs],
     }
@@ -670,9 +619,6 @@ def main(args: argparse.Namespace):
     print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
-
-    ttft_threshold = args.ttft_threshold
-    tbt_threshold = args.tbt_threshold
 
     backend = args.backend
     model_id = args.model
@@ -780,8 +726,6 @@ def main(args: argparse.Namespace):
                 float(p) for p in args.metric_percentiles.split(",")
             ],
             ignore_eos=args.ignore_eos,
-            ttft_threshold=ttft_threshold,
-            tbt_threshold=tbt_threshold,
         ))
 
     # Save config and results to json
@@ -980,18 +924,6 @@ if __name__ == "__main__":
         "To report 25-th, 50-th, and 75-th percentiles, use \"25,50,75\". "
         "Default value is \"99\". "
         "Use \"--percentile-metrics\" to select metrics.",
-    )
-    parser.add_argument(
-        "--ttft-threshold",
-        type=float,
-        default=1.0,
-        help="TTFT threshold in seconds. Requests exceeding this are counted as violations.",
-    )
-    parser.add_argument(
-        "--tbt-threshold",
-        type=float,
-        default=0.1,
-        help="TBT (Time Between Tokens) threshold in seconds. Token intervals exceeding this are counted as violations.",
     )
 
     # group for dataset specific arguments

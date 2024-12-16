@@ -1234,7 +1234,7 @@ class Scheduler:
         for victim in running_seqs:
             logger.info(f"目前剩余时间最多的序列有seq_duration:{victim.seqs[0].seq_duration}\n"
                             f"它的completion_token_ids长度为:{len(victim.seqs[0].completion_token_ids)}\n"
-                            f"它的output_text为:{victim.seqs[0].output_text}"
+                            # f"它的output_text为:{victim.seqs[0].output_text}"
                         )
             # 执行抢占
             self._preempt(victim, blocks_to_swap_out)
@@ -1280,9 +1280,8 @@ class Scheduler:
         prefills = SchedulerPrefillOutputs.create_empty()
         running_scheduled = SchedulerRunningOutputs.create_empty()
         swapped_in = SchedulerSwappedInOutputs.create_empty()
-
         # If any requests are swapped, prioritized swapped requests.
-        if not self.swapped or self.waiting and _should_force_schedule(self.waiting[0], AllocStatus.LATER):
+        if not self.swapped or self.waiting and self._should_force_schedule(self.waiting[0], AllocStatus.LATER):
             prefills = self._schedule_prefills(budget,
                                                curr_loras,
                                                enable_chunking=False)
@@ -1865,6 +1864,10 @@ class Scheduler:
     def _passed_delay(self, now: float) -> bool:
         if self.prev_prompt:
             self.last_prompt_latency = now - self.prev_time
+
+        print(f"delay_factor:{self.scheduler_config.delay_factor}")
+        print(f"last_prompt_latency:{self.last_prompt_latency}")
+
         self.prev_time, self.prev_prompt = now, False
         # Delay scheduling prompts to let waiting queue fill up
         if self.scheduler_config.delay_factor > 0 and self.waiting:
