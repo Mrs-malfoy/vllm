@@ -40,6 +40,8 @@ class RequestFuncOutput:
     latency: float = 0.0
     ttft: float = 0.0  # Time to first token
     ttfs: float = 0.0  # Time to first speech
+    fsl: int = 0  # First sentence length
+    fst: float = 0.0  # First sentence time
     itl: List[float] = field(
         default_factory=list)  # List of inter-token latencies
     prompt_len: int = 0
@@ -258,6 +260,8 @@ async def async_request_openai_completions(
         generated_text = ""
         ttft = 0.0
         ttfs = 0.0 # feat: 添加time to first speech属性
+        fsl = 0
+        fst = 0.0
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
@@ -293,9 +297,15 @@ async def async_request_openai_completions(
                                     ttft = time.perf_counter() - st
                                     output.ttft = ttft
                                 
-                                if ttfs == 0.0 and has_punct:
-                                    ttfs = time.perf_counter() - st
-                                    output.ttfs = ttfs
+                                if ttfs == 0.0:
+                                    if has_punct:
+                                        ttfs = time.perf_counter() - st
+                                        fst = ttfs - ttft
+                                        output.ttfs = ttfs
+                                        output.fsl = fsl
+                                        output.fst = fst
+                                    else:
+                                        fsl += 1
 
                                 # Dec oding phase
                                 else:

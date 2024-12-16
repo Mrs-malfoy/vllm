@@ -119,6 +119,7 @@ def sample_sharegpt_requests(
         # print(f"human:{prompt}")
         # print(f"token_id:{prompt_token_ids}")
         completion = dataset[i]["assistant"]    # 根据实际数据集的格式修改
+        print(i, completion)
         completion_token_ids = tokenizer(completion).input_ids
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
@@ -337,6 +338,8 @@ def calculate_metrics(
     ttfts: List[float] = []
     e2els: List[float] = []
     ttfss: List[float] = [] # feat: 添加属性
+    fsls: List[int] = []
+    fsts: List[int] = []
     for i in range(len(outputs)):
         if outputs[i].success:
             # We use the tokenizer to count the number of output tokens for all
@@ -359,6 +362,8 @@ def calculate_metrics(
             ttfts.append(outputs[i].ttft)
             e2els.append(outputs[i].latency)
             ttfss.append(outputs[i].ttfs)
+            fsls.append(outputs[i].fsl)
+            fsts.append(outputs[i].fst)
             completed += 1
         else:
             actual_output_lens.append(0)
@@ -555,6 +560,8 @@ async def benchmark(
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
         "output_lens": actual_output_lens,
+        "fsls": [output.fsl for output in outputs], #添加这两个属性
+        "fsts": [output.fst for output in outputs], #计算第一句话的平均token数和decode速度
         "ttfss": [output.ttfs for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
