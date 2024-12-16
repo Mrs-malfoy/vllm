@@ -436,7 +436,9 @@ class Scheduler:
         current_time = time.time()
         wait_time = current_time - seq_group.arrival_time
 
-        return wait_time > self.max_wait_time
+        prompt_tokens_len = len(seq_group.seqs[0].prompt_token_ids)
+
+        return wait_time + 0.46824 + (9.6e-5) * prompt_tokens_len > self.max_wait_time
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
@@ -1280,7 +1282,7 @@ class Scheduler:
         swapped_in = SchedulerSwappedInOutputs.create_empty()
 
         # If any requests are swapped, prioritized swapped requests.
-        if not self.swapped or self.waiting and (time.time() - self.waiting[0].arrival_time > self.max_wait_time):
+        if not self.swapped or self.waiting and _should_force_schedule(self.waiting[0], AllocStatus.LATER):
             prefills = self._schedule_prefills(budget,
                                                curr_loras,
                                                enable_chunking=False)

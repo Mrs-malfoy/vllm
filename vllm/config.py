@@ -975,7 +975,7 @@ class SchedulerConfig:
                  max_num_batched_tokens: Optional[int],
                  max_num_seqs: int,
                  max_model_len: int,
-                 max_wait_time: float = 1,  # 添加最大等待时间配置,默认2秒
+                 max_wait_time: float = 1.5,  # 添加最大等待时间配置,默认1.5秒
                  num_lookahead_slots: int = 0,
                  delay_factor: float = 0.0,
                  enable_chunked_prefill: bool = False,
