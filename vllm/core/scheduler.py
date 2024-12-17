@@ -1865,9 +1865,6 @@ class Scheduler:
         if self.prev_prompt:
             self.last_prompt_latency = now - self.prev_time
 
-        print(f"delay_factor:{self.scheduler_config.delay_factor}")
-        print(f"last_prompt_latency:{self.last_prompt_latency}")
-
         self.prev_time, self.prev_prompt = now, False
         # Delay scheduling prompts to let waiting queue fill up
         if self.scheduler_config.delay_factor > 0 and self.waiting:
@@ -1927,6 +1924,9 @@ class Scheduler:
         seqs = seq_group.get_seqs(status=status)
         for seq in seqs:
             num_new_tokens += seq.get_num_new_tokens()
+        
+        if num_new_tokens == 0:
+            print(seq_group.get_seqs())
         assert num_new_tokens > 0
         # Chunk if a running request cannot fit in the given budget.
         # If number of seq > 1, it means it is doing beam search

@@ -294,11 +294,7 @@ async def async_request_openai_completions(
                                 text = data["choices"][0]["text"]
                                 has_punct = bool(re.search('[,!?:;。，！？；：]', text))
                                 timestamp = time.perf_counter()
-                                # First token
-                                if ttft == 0.0:
-                                    ttft = time.perf_counter() - st
-                                    output.ttft = ttft
-                                
+
                                 if ttfs == 0.0:
                                     if has_punct:
                                         ttfs = time.perf_counter() - st
@@ -308,7 +304,11 @@ async def async_request_openai_completions(
                                         output.fst = fst
                                     else:
                                         fsl += 1
-
+                                        
+                                # First token
+                                if ttft == 0.0:
+                                    ttft = time.perf_counter() - st
+                                    output.ttft = ttft
                                 # Dec oding phase
                                 else:
                                     output.itl.append(timestamp -
