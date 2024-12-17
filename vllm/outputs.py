@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 from typing import Sequence as GenericSequence
 from typing import Union
+from typing import Tuple
 
 from vllm.inputs import PromptType
 from vllm.lora.request import LoRARequest
@@ -98,7 +99,7 @@ class RequestOutput:
         prompt_logprobs: Optional[PromptLogprobs],
         outputs: List[CompletionOutput],
         finished: bool,
-        interrupted: Optional[bool] = False,
+        interrupted: Optional[Tuple[bool, float]] = (False, 0.0), # fix: 把类型改为元组，添加第一次中断属性
         metrics: Optional[RequestMetrics] = None,
         lora_request: Optional[LoRARequest] = None,
         encoder_prompt: Optional[str] = None,
@@ -121,7 +122,7 @@ class RequestOutput:
     def from_seq_group(cls, seq_group: SequenceGroup,
                        use_cache: bool) -> Optional["RequestOutput"]:
         # feat: 定义interrupted
-        interrupted = False
+        interrupted = (False, 0.0)
         sampling_params = seq_group.sampling_params
         if sampling_params is None:
             raise ValueError(

@@ -426,7 +426,7 @@ class Sequence:
 
         self.arrival_time = arrival_time
         # feat: 新建记录播放是否中断的属性
-        self.interrupted = False
+        self.interrupted: Tuple[bool, float] = (False, 0.0)
 
         # For decoder-only models, a Sequence is constructed
         # from an DecoderOnlyInputs instance (the `inputs` arg.)
@@ -631,7 +631,7 @@ class Sequence:
             elif self.seq_duration - (time.time() - self.first_sentence_time) < synthesis_duration:
                 # print(f"self.seq_duration:{self.seq_duration}, (time.time() - self.first_sentence_time):{(time.time() - self.first_sentence_time)}, synthesis_duration:{synthesis_duration}")
                 # print(current_output_text)
-                self.interrupted = True # feat: 如果中断，将标记设为true
+                self.interrupted = (True, time.time() - self.first_sentence_time) # feat: 如果中断，将标记设为true fix: 记录播放到多少秒第一次中断
             #计算新的完整句子的时长
             sentence_duration = self.calculate_sentence_duration(current_output_text)
             # 更新总语音时长

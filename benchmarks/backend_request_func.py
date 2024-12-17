@@ -6,6 +6,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
+from typing import Tuple
 
 import aiohttp
 import huggingface_hub.constants
@@ -34,7 +35,7 @@ class RequestFuncInput:
 
 @dataclass
 class RequestFuncOutput:
-    interrupted: bool = False
+    interrupted: Tuple[bool, float] = (False, 0.0)
     generated_text: str = ""
     success: bool = False
     latency: float = 0.0
@@ -283,8 +284,8 @@ async def async_request_openai_completions(
                         else:
                             data = json.loads(chunk)
                             # print(data)
-                            if data["interrupted"]:
-                                output.interrupted = True
+                            if data["interrupted"][0]:
+                                output.interrupted = data["interrupted"]
                             # NOTE: Some completion API might have a last
                             # usage summary response without a token so we
                             # want to check a token was generated

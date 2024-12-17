@@ -34,7 +34,6 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, AsyncGenerator, Collection, Dict, List, Optional, Tuple
-
 import numpy as np
 from backend_request_func import (ASYNC_REQUEST_FUNCS, RequestFuncInput,
                                   RequestFuncOutput)
@@ -119,7 +118,6 @@ def sample_sharegpt_requests(
         # print(f"human:{prompt}")
         # print(f"token_id:{prompt_token_ids}")
         completion = dataset[i]["assistant"]    # 根据实际数据集的格式修改
-        print(i, completion)
         completion_token_ids = tokenizer(completion).input_ids
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
@@ -340,6 +338,8 @@ def calculate_metrics(
     ttfss: List[float] = [] # feat: 添加属性
     fsls: List[int] = []
     fsts: List[int] = []
+    fit: List[float] = [] # first interrupted time
+
     for i in range(len(outputs)):
         if outputs[i].success:
             # We use the tokenizer to count the number of output tokens for all
@@ -347,7 +347,7 @@ def calculate_metrics(
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
 
-            if outputs[i].interrupted:
+            if outputs[i].interrupted[0]:
                 interrupted += 1
 
             output_len = len(
@@ -364,6 +364,7 @@ def calculate_metrics(
             ttfss.append(outputs[i].ttfs)
             fsls.append(outputs[i].fsl)
             fsts.append(outputs[i].fst)
+            fit.append(outputs[i].interrupted[1])
             completed += 1
         else:
             actual_output_lens.append(0)
@@ -565,6 +566,7 @@ async def benchmark(
         "ttfss": [output.ttfs for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
+        "fit": [output.interrupted[1] for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
         "errors": [output.error for output in outputs],
     }
