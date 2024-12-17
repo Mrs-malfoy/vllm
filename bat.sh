@@ -31,7 +31,7 @@ run_benchmark() {
     cd benchmarks    
     echo "Running benchmark..."
     # 运行benchmark
-    python benchmarks/bat.py
+    python bat.py
     cd ..
 
     echo "Stopping vllm service..."
