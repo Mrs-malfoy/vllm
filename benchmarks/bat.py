@@ -22,7 +22,7 @@ def run_benchmark(request_rate, run_number):
 
 def main():
     # 定义要测试的request-rate值
-    rates = [12, 10, 8, 6, 4]  # 可以根据需要修改
+    rates = [6.5, 7, 7.5, 8.5, 9, 9.5]  # 可以根据需要修改
     runs_per_rate = 5  # 每个速率测试5次
     
     for rate in rates:
