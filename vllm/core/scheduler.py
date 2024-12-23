@@ -1100,6 +1100,7 @@ class Scheduler:
         inter token latency because decodes requests don't need to be blocked
         by prefill requests.
         """
+        start_time = time.perf_counter()
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
@@ -1148,6 +1149,38 @@ class Scheduler:
 
         # Update swapped requests.
         self.swapped.extend(running_scheduled.swapped_out)
+
+        # 计算GPU和CPU的缓存使用率
+        gpu_cache_usage = 0.0
+        if self.block_manager.num_total_gpu_blocks is not None:
+            num_free_gpu = self.block_manager.get_num_free_gpu_blocks()
+            gpu_cache_usage = 1.0 - (num_free_gpu / self.block_manager.num_total_gpu_blocks)
+
+        cpu_cache_usage = 0.0
+        if self.block_manager.num_total_cpu_blocks is not None and self.block_manager.num_total_cpu_blocks > 0:
+            num_free_cpu = self.block_manager.get_num_free_cpu_blocks()
+            cpu_cache_usage = 1.0 - (num_free_cpu / self.block_manager.num_total_cpu_blocks)
+            
+        # 计算prefill和decode数量
+        num_prefills = (len(prefills.seq_groups) + 
+                    len(swapped_in.prefill_seq_groups) + 
+                    len(running_scheduled.prefill_seq_groups))
+        num_decodes = (len(running_scheduled.decode_seq_groups) + 
+                    len(swapped_in.decode_seq_groups))
+
+        # 计算执行时间
+        execution_time = time.perf_counter() - start_time
+
+        # 记录日志
+        logger.info(
+            f"Schedule stats - "
+            f"Prefills: {num_prefills}, "
+            f"Decodes: {num_decodes}, "
+            f"GPU cache usage: {gpu_cache_usage:.2%}, "
+            f"CPU cache usage: {cpu_cache_usage:.2%}, "
+            f"Execution time: {execution_time*1000:.2f}ms"
+        )
+
         return SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
                                   running_scheduled.prefill_seq_groups +
