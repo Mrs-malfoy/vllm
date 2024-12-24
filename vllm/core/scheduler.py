@@ -1167,6 +1167,11 @@ class Scheduler:
         running_seqs = deque(self.running)
         # 尝试抢占直到能恢复当前序列
         for victim in running_seqs:
+            budget.subtract_num_batched_tokens(seq_group.request_id, 1) # decode一轮产生一个token
+            num_running_seqs = seq_group.get_max_num_running_seqs()
+            budget.subtract_num_seqs(seq_group.request_id,
+                                         num_running_seqs)
+            
             self._preempt(victim, blocks_to_swap_out)
             self.running.popleft()
             preempted_seqs.append(victim)  # 添加到被抢占列表
@@ -1264,7 +1269,6 @@ class Scheduler:
         decodes. If there's a pressure on GPU memory, decode requests can
         be swapped or preempted.
         """
-        flag = 0
         # Include running requests to the budget.
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
@@ -1316,7 +1320,6 @@ class Scheduler:
                 # print(f"Swapped:{self.swapped}")
                 # print(f"running:{self.running}")
                 swapped_in = self._schedule_swapped(budget, curr_loras)
-                flag = 1
 
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
