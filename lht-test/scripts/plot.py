@@ -72,6 +72,37 @@ with open(log_path + '/exec_time_stats.csv', 'w') as f:
         avg_time = avg_stats[key]
         count = len(stats[key])
         f.write(f"{prefill},{decode},{avg_time:.2f},{count}\n")
+# 为每个prefill值创建单独的数据集
+prefill_0_data = [(k[1], v) for k, v in avg_stats.items() if k[0] == 0]
+prefill_1_data = [(k[1], v) for k, v in avg_stats.items() if k[0] == 1]
+prefill_2_data = [(k[1], v) for k, v in avg_stats.items() if k[0] == 2]
+
+# 按decode数量排序
+prefill_0_data.sort()
+prefill_1_data.sort() 
+prefill_2_data.sort()
+
+plt.figure(figsize=(12, 8))
+
+if prefill_0_data:
+    decodes_0, times_0 = zip(*prefill_0_data)
+    plt.plot(decodes_0, times_0, 'b-', label='Prefill=0', linewidth=2)
+
+if prefill_1_data:
+    decodes_1, times_1 = zip(*prefill_1_data)
+    plt.plot(decodes_1, times_1, 'r-', label='Prefill=1', linewidth=2)
+
+if prefill_2_data:
+    decodes_2, times_2 = zip(*prefill_2_data)
+    plt.plot(decodes_2, times_2, 'g-', label='Prefill=2', linewidth=2)
+
+plt.title('Average Execution Time vs Decode Count by Prefill Value', fontsize=14)
+plt.xlabel('Decode Count', fontsize=12)
+plt.ylabel('Average Execution Time (ms)', fontsize=12)
+plt.grid(True)
+plt.legend()
+plt.savefig(log_path+'/exec_time_by_prefill.png', bbox_inches='tight')
+plt.close()
 
 
 # 创建x轴数据

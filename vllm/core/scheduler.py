@@ -1172,14 +1172,14 @@ class Scheduler:
         # execution_time = time.perf_counter() - start_time
 
         # 记录日志
-        logger.info(
-            f"Schedule stats - "
-            f"Prefills: {num_prefills}, "
-            f"Decodes: {num_decodes}, "
-            f"GPU cache usage: {gpu_cache_usage:.2%}, "
-            f"CPU cache usage: {cpu_cache_usage:.2%}, "
-            # f"Execution time: {execution_time*1000:.2f}ms"
-        )
+        # logger.info(
+        #     f"Schedule stats - "
+        #     f"Prefills: {num_prefills}, "
+        #     f"Decodes: {num_decodes}, "
+        #     f"GPU cache usage: {gpu_cache_usage:.2%}, "
+        #     f"CPU cache usage: {cpu_cache_usage:.2%}, "
+        #     # f"Execution time: {execution_time*1000:.2f}ms"
+        # )
 
         return SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
