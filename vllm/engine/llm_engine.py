@@ -1316,6 +1316,11 @@ class LLMEngine:
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
 
+
+        # 记录开始时间
+        start_time = time.perf_counter()
+        scheduler_time = 0
+
         # For llm_engine, there is no pipeline parallel support, so the engine
         # used is always 0.
         virtual_engine = 0
@@ -1340,6 +1345,10 @@ class LLMEngine:
             (seq_group_metadata_list, scheduler_outputs,
              allow_async_output_proc
              ) = self.scheduler[virtual_engine].schedule()
+            
+            # 记录调度用时
+            end_time1 = time.perf_counter()
+            scheduler_time = end_time1 - start_time
 
             ctx.seq_group_metadata_list = seq_group_metadata_list
             ctx.scheduler_outputs = scheduler_outputs
@@ -1388,6 +1397,11 @@ class LLMEngine:
 
             outputs = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
+            end_time2 = time.perf_counter()
+            execute_model_time = end_time2 - end_time1
+            
+            logger.info(f"Schedule iteration took {scheduler_time:.4f} seconds"
+                        f"Execute model took {execute_model_time:.4f} seconds")
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.

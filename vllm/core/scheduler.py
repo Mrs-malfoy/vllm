@@ -1169,7 +1169,7 @@ class Scheduler:
                     len(swapped_in.decode_seq_groups))
 
         # 计算执行时间
-        execution_time = time.perf_counter() - start_time
+        # execution_time = time.perf_counter() - start_time
 
         # 记录日志
         logger.info(
@@ -1178,7 +1178,7 @@ class Scheduler:
             f"Decodes: {num_decodes}, "
             f"GPU cache usage: {gpu_cache_usage:.2%}, "
             f"CPU cache usage: {cpu_cache_usage:.2%}, "
-            f"Execution time: {execution_time*1000:.2f}ms"
+            # f"Execution time: {execution_time*1000:.2f}ms"
         )
 
         return SchedulerOutputs(
