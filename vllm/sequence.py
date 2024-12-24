@@ -476,13 +476,12 @@ class Sequence:
         
         #Estimated Speech Output Duration
         self.seq_duration = 0.0  # 初始化语音总时长
+        self.first_sentence_time = time.time()
 
     def calculate_sentence_duration(self, sentence: str) -> float:
         k = 0.2  # 假设每个字符对应0.2秒的语音时长，这个值可以根据实际情况调整
         return len(sentence) * k
 
-        self.seq_duration = 0.0  # 初始化语音总时长
-        self.first_sentence_time = time.time()
 
     def calculate_sentence_duration(self, sentence: str) -> float:
         k = 0.2  # 假设每个字符对应0.2秒的语音时长，这个值可以根据实际情况调整
@@ -631,45 +630,9 @@ class Sequence:
 
         # 获取自上次调用以来新生成的文本
         current_output_text = self.output_text
-        #计算新的完整句子的时长
-        # sentence_duration = self.calculate_sentence_duration(current_output_text)
-        # # 更新总语音时长
-        # self.seq_duration = sentence_duration
-        #检查是否生成了新的分句
-        if self.is_sentence_end(current_output_text):
-            #计算新的完整句子的时长
-            sentence_duration = self.calculate_sentence_duration(current_output_text)
-            # 更新总语音时长
-            self.seq_duration = sentence_duration
-        #     # 获取当前完整的输出文本
-        #     full_text = self.get_output_text_to_return(buffer_length=0, delta=False)
-        #     # 从最后一个句子结束符位置开始，提取最新的完整句子
-        #     last_sentence_start = max(
-        #         full_text[:-1].rfind('。'),
-        #         full_text[:-1].rfind('！'),
-        #         full_text[:-1].rfind('？'),
-        #         full_text[:-1].rfind('；'),
-        #         full_text[:-1].rfind('：'),
-        #         full_text[:-1].rfind('，')
-        #     )
-        #     if last_sentence_start == -1:
-        #         # 如果找不到前一个句子结束符，说明这是第一个句子
-        #         latest_sentence = full_text
-        #     else:
-        #         # 提取最新的完整句子
-        #         latest_sentence = full_text[last_sentence_start + 1:]
-                
-        #     # 计算新的完整句子的时长
-        #     sentence_duration = self.calculate_sentence_duration(full_text)
-        #     # 更新总语音时长
-        #     self.seq_duration = sentence_duration
-
-    def is_sentence_end(self, text: str) -> bool:
-        # 检查文本是否以句号、逗号、感叹号、问号、分号或冒号结束
-        return text.endswith((',', '.', '!', '?', ':', ';', '。', '，', '！', '？', '；', '：'))  
-
-        # 获取自上次调用以来新生成的文本
-        current_output_text = self.output_text
+        # if current_output_text.startswith("当然可以“万教"):
+        #     print(f"current_output_text:{current_output_text}")
+        #     print(f"self.seq_duration:{self.seq_duration}")
         #检查是否生成了新的分句
         if self.is_sentence_end(current_output_text):
             # print(current_output_text, self.seq_duration)
@@ -679,8 +642,8 @@ class Sequence:
             if self.seq_duration < 0.2:
                 self.first_sentence_time = time.time() + self.calculate_synthesis_duration(current_output_text)
             elif self.seq_duration - (time.time() - self.first_sentence_time) < synthesis_duration:
-                # print(f"self.seq_duration:{self.seq_duration}, (time.time() - self.first_sentence_time):{(time.time() - self.first_sentence_time)}, synthesis_duration:{synthesis_duration}")
-                # print(current_output_text)
+                print(f"self.seq_duration:{self.seq_duration}, (time.time() - self.first_sentence_time):{(time.time() - self.first_sentence_time)}, synthesis_duration:{synthesis_duration}")
+                print(current_output_text)
                 self.interrupted = (True, time.time() - self.first_sentence_time) # feat: 如果中断，将标记设为true fix: 记录播放到多少秒第一次中断
             #计算新的完整句子的时长
             sentence_duration = self.calculate_sentence_duration(current_output_text)
@@ -688,15 +651,21 @@ class Sequence:
             self.seq_duration = sentence_duration
     
     def get_last_sentence(self, text: str) ->str:
-        sentences = re.split(r'[,!?;:；。！？：]+', text.strip())
+        sentences = re.split(r'[,!?;:；。，！？：、”“《》\n]+', text.strip())
         # 去除空字符串并返回最后一个分句
         sentences = [s for s in sentences if s]  # 过滤掉空字符串
         return sentences[-1] if sentences else ''  # 返回最后一个分句或空字符串
 
     def is_sentence_end(self, text: str) -> bool:
-        # 检查文本是否以句号、逗号、感叹号、问号、分号或冒号结束
-        return text.endswith((',', '!', '?', ':', ';', '。', '，', '！', '？', '；', '：'))  
-
+        is_end = text.endswith((',', '!', '?', ':', ';', '，', '。', '！', '？', '；', '：','、', '”', '“', '《', '》', '\n'))  
+        if not is_end:
+            return False
+        sentences = re.split(r'[,!?;:；。，！？：、”“《》\n]+', text.strip())
+        sentences = [s for s in sentences if s]  # 过滤掉空字符串
+        last_sentence = sentences[-1] if sentences else ''
+        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', last_sentence))
+        return has_chinese     # 检查文本是否以句号、逗号、感叹号、问号、分号或冒号结束
+         
     def get_len(self) -> int:
         return self.data.get_len()
 

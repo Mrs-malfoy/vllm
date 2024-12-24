@@ -292,7 +292,7 @@ async def async_request_openai_completions(
                             # want to check a token was generated
                             if data["choices"][0]["text"]:
                                 text = data["choices"][0]["text"]
-                                has_punct = bool(re.search('[,!?:;。，！？；：]', text))
+                                has_punct = bool(re.search('[,!?:;。，！？；：\n]', text))
                                 timestamp = time.perf_counter()
 
                                 if ttfs == 0.0:
