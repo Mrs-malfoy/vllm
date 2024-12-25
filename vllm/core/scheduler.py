@@ -440,6 +440,69 @@ class Scheduler:
 
         return wait_time + 0.46824 + (9.6e-5) * prompt_tokens_len > self.max_wait_time
 
+    def _get_waiting_overtime(self, seq_group: SequenceGroup) -> float:
+        """计算waiting队列中序列组的超时时长
+        
+        Args:
+            seq_group: 待检查的序列组
+            alloc_status: 资源分配状态
+            
+        Returns:
+            float: 超出阈值的时长(秒),如果未超时则返回0
+        """
+        current_time = time.time()
+        wait_time = current_time - seq_group.arrival_time
+        
+        # 计算预期等待时间
+        prompt_tokens_len = len(seq_group.seqs[0].prompt_token_ids)
+        expected_wait = 0.46824 + (9.6e-5) * prompt_tokens_len
+        
+        # 计算超出阈值的时长
+        overtime = wait_time + expected_wait - self.max_wait_time
+        
+        return max(0.0, overtime)
+
+    def _get_swapped_overtime(self, seq_group: SequenceGroup) -> float:
+        """计算swap队列中序列组的超时时长
+        
+        Args:
+            seq_group: 待检查的序列组
+            
+        Returns:
+            float: 超出阈值的时长(秒),如果未超时则返回0
+        """
+        if seq_group.is_finished():
+            return 0.0
+        
+        if not seq_group.metrics or not seq_group.metrics.first_scheduled_time:
+            return 0.0
+            
+        current_time = time.time()
+        # 计算剩余可播放时间
+        remaining_audio_time = (
+            seq_group.seqs[0].seq_duration - 
+            (current_time - seq_group.metrics.first_scheduled_time)
+        )
+        
+        # 如果剩余时间小于1秒则认为超时
+        # 这里的1.0是一个阈值,可以根据需要调整
+        overtime = 0.18 - remaining_audio_time
+        
+        return max(0.0, overtime)
+
+    def _get_most_urgent_waiting_overtime(self) -> float:
+        """获取waiting队列中最紧急的超时时长"""
+        if not self.waiting:
+            return 0.0
+        return self._get_waiting_overtime(self.waiting[0])
+
+    def _get_most_urgent_swapped_overtime(self) -> float:
+        """获取swap队列中最紧急的超时时长"""
+        if not self.swapped:
+            return 0.0
+        return max(self._get_swapped_overtime(seq_group) for seq_group in self.swapped)
+
+
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
         self.waiting.append(seq_group)
@@ -1288,7 +1351,8 @@ class Scheduler:
         running_scheduled = SchedulerRunningOutputs.create_empty()
         swapped_in = SchedulerSwappedInOutputs.create_empty()
         # If any requests are swapped, prioritized swapped requests.
-        if not self.swapped or self.waiting and self._should_force_schedule(self.waiting[0], AllocStatus.LATER):
+        if not self.swapped or (self.waiting and 
+            self._get_most_urgent_waiting_overtime() > self._get_most_urgent_swapped_overtime()):
             prefills = self._schedule_prefills(budget,
                                                curr_loras,
                                                enable_chunking=False)
