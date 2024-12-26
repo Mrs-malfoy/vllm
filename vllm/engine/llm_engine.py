@@ -1405,10 +1405,10 @@ class LLMEngine:
             count_decode = 0
             count_prefill = 0
             for sg in scheduler_outputs.scheduled_seq_groups:
-                if sg.seq_group.state.num_steps > 1:
-                    count_decode += 1
-                else:
+                if sg.seq_group.is_prefill():
                     count_prefill += 1
+                else:
+                    count_decode += 1
 
             logger.info(f"Schedule stats - decode:{count_decode}, prefill:{count_prefill}, swap:{len(scheduler_outputs.blocks_to_swap_in) + len(scheduler_outputs.blocks_to_swap_out)}, scheduler_time:{scheduler_time:.4f}, exec_time:{execute_model_time:.4f}")
 
