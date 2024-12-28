@@ -13,50 +13,36 @@ gpu_usage = []
 cpu_usage = []
 schedule_time = []
 exec_time = []
-
+swap_count = []
 # 解析日志文件
 with open(log_path+"/vllm.log", 'r') as f:
     lines = f.readlines()
-    i = 0
-    while i < len(lines):
-        if 'Schedule stats' in lines[i]:
-            # 从当前行解析统计信息
-            prefill_match = re.search(r'Prefills: (\d+)', lines[i])
-            # print(prefill_match)
-            # exit()
-            decode_match = re.search(r'Decodes: (\d+)', lines[i])
-            gpu_match = re.search(r'GPU cache usage: ([\d.]+)', lines[i])
-            cpu_match = re.search(r'CPU cache usage: ([\d.]+)', lines[i])
+    for line in lines:
+        if 'Schedule stats' in line:
+            # 使用新的正则表达式匹配模式
+            decode_match = re.search(r'decode:(\d+)', line)
+            prefill_match = re.search(r'prefill:(\d+)', line)
+            scheduler_time_match = re.search(r'scheduler_time:([\d.]+)', line)
+            exec_time_match = re.search(r'exec_time:([\d.]+)', line)
+            swap_match = re.search(r'swap:(\d+)', line)
             
-            # 从下一行解析时间信息
-            if i + 1 < len(lines):
-                schedule_time_match = re.search(r'Schedule iteration took ([\d.]+)', lines[i+1])
-                exec_time_match = re.search(r'Execute model took ([\d.]+)', lines[i + 1])
-                
-                # print(schedule_time_match)
-                # exit()
-                if all([prefill_match, decode_match, gpu_match, cpu_match, schedule_time_match, exec_time_match]):
-                    prefills.append(int(prefill_match.group(1)))
-                    decodes.append(int(decode_match.group(1)))
-                    total_compute.append(int(prefill_match.group(1)) + int(decode_match.group(1)))
-                    gpu_usage.append(float(gpu_match.group(1)))
-                    cpu_usage.append(float(cpu_match.group(1)))
-                    exec_time.append(float(exec_time_match.group(1)) * 1000)  # 转换为毫秒
-                    schedule_time.append(float(schedule_time_match.group(1)) * 1000)  # 转换为毫秒
-                    # print(f"{int(prefill_match.group(1))},{int(decode_match.group(1))},{float(exec_time_match.group(1)) * 1000}")
-            i += 2  # 每次处理两行
-        else:
-            i += 1
-
+            if all([prefill_match, decode_match, scheduler_time_match, exec_time_match,swap_match]):
+                prefills.append(int(prefill_match.group(1)))
+                decodes.append(int(decode_match.group(1)))
+                total_compute.append(int(prefill_match.group(1)) + int(decode_match.group(1)))
+                exec_time.append(float(exec_time_match.group(1)) * 1000)  # 转换为毫秒
+                schedule_time.append(float(scheduler_time_match.group(1)) * 1000)  # 转换为毫秒
+                swap_count.append(float(swap_match.group(1))) 
 # 创建一个字典来存储不同(prefill, decode)组合的执行时间
 stats = {}
 
 # 收集数据
-for p, d, t in zip(prefills, decodes, exec_time):
-    key = (p, d)
-    if key not in stats:
-        stats[key] = []
-    stats[key].append(t)
+for p, d, t, s in zip(prefills, decodes, exec_time, swap_count):
+    if(s == 0):
+        key = (p, d)
+        if key not in stats:
+            stats[key] = []
+        stats[key].append(t)
 
 # 计算平均执行时间
 avg_stats = {}
@@ -72,30 +58,46 @@ with open(log_path + '/exec_time_stats.csv', 'w') as f:
         avg_time = avg_stats[key]
         count = len(stats[key])
         f.write(f"{prefill},{decode},{avg_time:.2f},{count}\n")
-# 为每个prefill值创建单独的数据集
-prefill_0_data = [(k[1], v) for k, v in avg_stats.items() if k[0] == 0]
-prefill_1_data = [(k[1], v) for k, v in avg_stats.items() if k[0] == 1]
-prefill_2_data = [(k[1], v) for k, v in avg_stats.items() if k[0] == 2]
+# 计算95%置信区间
+def confidence_interval(data):
+    if len(data) < 2:
+        return 0
+    return 1.96 * np.std(data) / np.sqrt(len(data))
+
+# 修改数据处理部分，增加误差计算
+stats_with_errors = {}
+for key in stats:
+    mean = np.mean(stats[key])
+    error = confidence_interval(stats[key])
+    stats_with_errors[key] = (mean, error)
+
+# 为每个prefill值创建包含误差的数据集
+prefill_0_data = [(k[1], v[0], v[1]) for k, v in stats_with_errors.items() if k[0] == 0]
+prefill_1_data = [(k[1], v[0], v[1]) for k, v in stats_with_errors.items() if k[0] == 1]
+prefill_2_data = [(k[1], v[0], v[1]) for k, v in stats_with_errors.items() if k[0] == 2]
 
 # 按decode数量排序
 prefill_0_data.sort()
-prefill_1_data.sort() 
+prefill_1_data.sort()
 prefill_2_data.sort()
 
 plt.figure(figsize=(12, 8))
 
+# 绘制带有误差线的图表
 if prefill_0_data:
-    decodes_0, times_0 = zip(*prefill_0_data)
-    plt.plot(decodes_0, times_0, 'b-', label='Prefill=0', linewidth=2)
+    decodes_0, times_0, errors_0 = zip(*prefill_0_data)
+    plt.errorbar(decodes_0, times_0, yerr=errors_0, fmt='b-', label='Prefill=0', 
+                linewidth=2, capsize=5, capthick=1, elinewidth=1)
 
 if prefill_1_data:
-    decodes_1, times_1 = zip(*prefill_1_data)
-    plt.plot(decodes_1, times_1, 'r-', label='Prefill=1', linewidth=2)
+    decodes_1, times_1, errors_1 = zip(*prefill_1_data)
+    plt.errorbar(decodes_1, times_1, yerr=errors_1, fmt='r-', label='Prefill=1', 
+                linewidth=2, capsize=5, capthick=1, elinewidth=1)
 
 if prefill_2_data:
-    decodes_2, times_2 = zip(*prefill_2_data)
-    plt.plot(decodes_2, times_2, 'g-', label='Prefill=2', linewidth=2)
-
+    decodes_2, times_2, errors_2 = zip(*prefill_2_data)
+    plt.errorbar(decodes_2, times_2, yerr=errors_2, fmt='g-', label='Prefill=2', 
+                linewidth=2, capsize=5, capthick=1, elinewidth=1)
 plt.title('Average Execution Time vs Decode Count by Prefill Value', fontsize=14)
 plt.xlabel('Decode Count', fontsize=12)
 plt.ylabel('Average Execution Time (ms)', fontsize=12)
@@ -133,6 +135,16 @@ plt.grid(True)
 plt.savefig(log_path+'/decodes.png', bbox_inches='tight')
 plt.close()
 
+# 2. Swap
+plt.figure()
+plt.plot(x, swap_count, 'r-', linewidth=2)
+plt.title('Number of Swap over Time', fontsize=14)
+plt.xlabel('Schedule Call Number', fontsize=12)
+plt.ylabel('Number of Swap', fontsize=12)
+plt.grid(True)
+plt.savefig(log_path+'/swap_count.png', bbox_inches='tight')
+plt.close()
+
 # 3. Total Compute图
 plt.figure()
 plt.plot(x, total_compute, 'g-', linewidth=2)
@@ -143,50 +155,50 @@ plt.grid(True)
 plt.savefig(log_path+'/total_compute.png', bbox_inches='tight')
 plt.close()
 
-# 3. GPU Usage图
-plt.figure()
-plt.plot(x, gpu_usage, 'g-', linewidth=2)
-plt.title('GPU Cache Usage over Time', fontsize=14)
-plt.xlabel('Schedule Call Number', fontsize=12)
-plt.ylabel('GPU Cache Usage (%)', fontsize=12)
-plt.grid(True)
-plt.savefig(log_path+'/gpu_usage.png', bbox_inches='tight')
-plt.close()
+# # 3. GPU Usage图
+# plt.figure()
+# plt.plot(x, gpu_usage, 'g-', linewidth=2)
+# plt.title('GPU Cache Usage over Time', fontsize=14)
+# plt.xlabel('Schedule Call Number', fontsize=12)
+# plt.ylabel('GPU Cache Usage (%)', fontsize=12)
+# plt.grid(True)
+# plt.savefig(log_path+'/gpu_usage.png', bbox_inches='tight')
+# plt.close()
 
-# 4. CPU Usage图
-plt.figure()
-plt.plot(x, cpu_usage, 'm-', linewidth=2)
-plt.title('CPU Cache Usage over Time', fontsize=14)
-plt.xlabel('Schedule Call Number', fontsize=12)
-plt.ylabel('CPU Cache Usage (%)', fontsize=12)
-plt.grid(True)
-plt.savefig(log_path+'/cpu_usage.png', bbox_inches='tight')
-plt.close()
+# # 4. CPU Usage图
+# plt.figure()
+# plt.plot(x, cpu_usage, 'm-', linewidth=2)
+# plt.title('CPU Cache Usage over Time', fontsize=14)
+# plt.xlabel('Schedule Call Number', fontsize=12)
+# plt.ylabel('CPU Cache Usage (%)', fontsize=12)
+# plt.grid(True)
+# plt.savefig(log_path+'/cpu_usage.png', bbox_inches='tight')
+# plt.close()
 
-# GPU和CPU使用率双Y轴图
-fig, ax1 = plt.subplots(figsize=(10, 6))
+# # GPU和CPU使用率双Y轴图
+# fig, ax1 = plt.subplots(figsize=(10, 6))
 
-# GPU使用率 - 左Y轴
-ax1.plot(x, gpu_usage, 'g-', linewidth=2, label='GPU Cache Usage')
-ax1.set_xlabel('Schedule Call Number', fontsize=12)
-ax1.set_ylabel('GPU Cache Usage (%)', fontsize=12, color='g')
-ax1.tick_params(axis='y', labelcolor='g')
+# # GPU使用率 - 左Y轴
+# ax1.plot(x, gpu_usage, 'g-', linewidth=2, label='GPU Cache Usage')
+# ax1.set_xlabel('Schedule Call Number', fontsize=12)
+# ax1.set_ylabel('GPU Cache Usage (%)', fontsize=12, color='g')
+# ax1.tick_params(axis='y', labelcolor='g')
 
-# CPU使用率 - 右Y轴 
-ax2 = ax1.twinx()
-ax2.plot(x, cpu_usage, 'm-', linewidth=2, label='CPU Cache Usage')
-ax2.set_ylabel('CPU Cache Usage (%)', fontsize=12, color='m')
-ax2.tick_params(axis='y', labelcolor='m')
+# # CPU使用率 - 右Y轴 
+# ax2 = ax1.twinx()
+# ax2.plot(x, cpu_usage, 'm-', linewidth=2, label='CPU Cache Usage')
+# ax2.set_ylabel('CPU Cache Usage (%)', fontsize=12, color='m')
+# ax2.tick_params(axis='y', labelcolor='m')
 
-# 添加标题和图例
-plt.title('Cache Usage over Time', fontsize=14)
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+# # 添加标题和图例
+# plt.title('Cache Usage over Time', fontsize=14)
+# lines1, labels1 = ax1.get_legend_handles_labels()
+# lines2, labels2 = ax2.get_legend_handles_labels()
+# ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
 
-plt.grid(True)
-plt.savefig(log_path+'/cache_usage_combined.png', bbox_inches='tight')
-plt.close()
+# plt.grid(True)
+# plt.savefig(log_path+'/cache_usage_combined.png', bbox_inches='tight')
+# plt.close()
 
 
 # 5. Execution Time图
@@ -213,7 +225,7 @@ plt.close()
 print(f"总调用次数: {len(prefills)}")
 print(f"Prefills - 平均: {np.mean(prefills):.2f}, 最大: {max(prefills)}, 最小: {min(prefills)}")
 print(f"Decodes - 平均: {np.mean(decodes):.2f}, 最大: {max(decodes)}, 最小: {min(decodes)}")
-print(f"GPU使用率 - 平均: {np.mean(gpu_usage):.2f}%, 最大: {max(gpu_usage):.2f}%, 最小: {min(gpu_usage):.2f}%")
-print(f"CPU使用率 - 平均: {np.mean(cpu_usage):.2f}%, 最大: {max(cpu_usage):.2f}%, 最小: {min(cpu_usage):.2f}%")
+# print(f"GPU使用率 - 平均: {np.mean(gpu_usage):.2f}%, 最大: {max(gpu_usage):.2f}%, 最小: {min(gpu_usage):.2f}%")
+# print(f"CPU使用率 - 平均: {np.mean(cpu_usage):.2f}%, 最大: {max(cpu_usage):.2f}%, 最小: {min(cpu_usage):.2f}%")
 print(f"执行时间 - 平均: {np.mean(exec_time):.2f}ms, 最大: {max(exec_time):.2f}ms, 最小: {min(exec_time):.2f}ms")
 print(f"Schedule Time - 平均: {np.mean(schedule_time):.2f}ms, 最大: {max(schedule_time):.2f}ms, 最小: {min(schedule_time):.2f}ms")
