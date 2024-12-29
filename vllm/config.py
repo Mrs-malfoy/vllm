@@ -981,6 +981,7 @@ class SchedulerConfig:
                  enable_chunked_prefill: bool = False,
                  embedding_mode: bool = False,
                  is_multimodal_model: bool = False,
+                 scheduler_strategy: Optional[str] = "default",   # 调度策略
                  preemption_mode: Optional[str] = None,
                  num_scheduler_steps: int = 1,
                  multi_step_stream_outputs: bool = False,
@@ -1029,6 +1030,7 @@ class SchedulerConfig:
         self.delay_factor = delay_factor
         self.chunked_prefill_enabled = enable_chunked_prefill
         self.embedding_mode = embedding_mode
+        self.scheduler_strategy = scheduler_strategy    # 调度策略
         self.preemption_mode = preemption_mode
         self.num_scheduler_steps = num_scheduler_steps
         self.multi_step_stream_outputs = multi_step_stream_outputs

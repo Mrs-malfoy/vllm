@@ -152,7 +152,7 @@ class EngineArgs:
     model_loader_extra_config: Optional[dict] = None
     ignore_patterns: Optional[Union[str, List[str]]] = None
     preemption_mode: Optional[str] = None
-
+    scheduler_strategy: Optional[str] = "default" # 调度策略
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: Optional[bool] = None
 
@@ -766,6 +766,14 @@ class EngineArgs:
             help='If \'recompute\', the engine performs preemption by '
             'recomputing; If \'swap\', the engine performs preemption by '
             'block swapping.')
+        
+        parser.add_argument(
+            "--scheduler-strategy",
+            type=str,
+            default="default",
+            choices=["default", "audio_player", "rate_controller"],
+            help="Scheduling strategy to use"
+        )
 
         parser.add_argument(
             "--served-model-name",
@@ -1035,6 +1043,7 @@ class EngineArgs:
             embedding_mode=model_config.embedding_mode,
             is_multimodal_model=model_config.is_multimodal_model,
             preemption_mode=self.preemption_mode,
+            scheduler_strategy=self.scheduler_strategy,
             num_scheduler_steps=self.num_scheduler_steps,
             multi_step_stream_outputs=self.multi_step_stream_outputs,
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
