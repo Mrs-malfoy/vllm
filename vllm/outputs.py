@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 from typing import Sequence as GenericSequence
 from typing import Union
+from typing import Tuple
 
 from vllm.inputs import PromptType
 from vllm.lora.request import LoRARequest
@@ -98,6 +99,7 @@ class RequestOutput:
         prompt_logprobs: Optional[PromptLogprobs],
         outputs: List[CompletionOutput],
         finished: bool,
+        interrupted: Optional[Tuple[bool, float]] = (False, 0.0), # fix: 把类型改为元组，添加第一次中断属性
         metrics: Optional[RequestMetrics] = None,
         lora_request: Optional[LoRARequest] = None,
         encoder_prompt: Optional[str] = None,
@@ -113,16 +115,23 @@ class RequestOutput:
         self.lora_request = lora_request
         self.encoder_prompt = encoder_prompt
         self.encoder_prompt_token_ids = encoder_prompt_token_ids
+        
+        self.interrupted = interrupted
 
     @classmethod
     def from_seq_group(cls, seq_group: SequenceGroup,
                        use_cache: bool) -> Optional["RequestOutput"]:
+        # feat: 定义interrupted
+        interrupted = (False, 0.0)
         sampling_params = seq_group.sampling_params
         if sampling_params is None:
             raise ValueError(
                 "Sampling parameters are missing for a CompletionRequest.")
 
         finished = seq_group.is_finished()
+        # feat: 如果完成再获取是否中断的信息
+        if finished:
+            interrupted = seq_group.get_seqs()[0].interrupted
         if sampling_params.output_kind == RequestOutputKind.FINAL_ONLY and (
                 not finished):
             return None
@@ -158,6 +167,9 @@ class RequestOutput:
         outputs = []
         include_prompt = True
         for i, seq in enumerate(top_n_seqs):
+            #feat: 任意一个语音中断则标记为中断
+            # if seq.interrupted:
+            #     interrupted = True
             output_text = seq.get_output_text_to_return(
                 text_buffer_length, delta)
 
@@ -235,7 +247,7 @@ class RequestOutput:
         seq_group.set_finished_time(finished_time)
 
         init_args = (seq_group.request_id, prompt, prompt_token_ids,
-                     prompt_logprobs, outputs, finished, seq_group.metrics,
+                     prompt_logprobs, outputs, finished, interrupted, seq_group.metrics,
                      seq_group.lora_request, encoder_prompt,
                      encoder_prompt_token_ids)
 

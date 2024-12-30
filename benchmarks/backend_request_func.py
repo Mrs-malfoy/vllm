@@ -1,3 +1,4 @@
+import re
 import json
 import os
 import sys
@@ -5,6 +6,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
+from typing import Tuple
 
 import aiohttp
 import huggingface_hub.constants
@@ -26,14 +28,21 @@ class RequestFuncInput:
     logprobs: Optional[int] = None
     multi_modal_content: Optional[dict] = None
     ignore_eos: bool = False
+    # python语法：默认参数不能出现在非默认参数前面！
+    completion_token_ids: Optional[List[int]] = None    # 加入原有输出
+    
 
 
 @dataclass
 class RequestFuncOutput:
+    interrupted: Tuple[bool, float] = (False, 0.0)
     generated_text: str = ""
     success: bool = False
     latency: float = 0.0
     ttft: float = 0.0  # Time to first token
+    ttfs: float = 0.0  # Time to first speech
+    fsl: int = 0  # First sentence length
+    fst: float = 0.0  # First sentence time
     itl: List[float] = field(
         default_factory=list)  # List of inter-token latencies
     prompt_len: int = 0
@@ -240,6 +249,7 @@ async def async_request_openai_completions(
             "logprobs": request_func_input.logprobs,
             "stream": True,
             "ignore_eos": request_func_input.ignore_eos,
+            "completion_token_ids": request_func_input.completion_token_ids,    # 添加客户端调用的参数
         }
         headers = {
             "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
@@ -250,12 +260,18 @@ async def async_request_openai_completions(
 
         generated_text = ""
         ttft = 0.0
+        ttfs = 0.0 # feat: 添加time to first speech属性
+        fsl = 0
+        fst = 0.0
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
+            #url默认值是"/v1/completions"
             async with session.post(url=api_url, json=payload,
                                     headers=headers) as response:
                 if response.status == 200:
+                    # print("success")
+                    # print(response.content)
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
                         if not chunk_bytes:
@@ -267,18 +283,32 @@ async def async_request_openai_completions(
                             latency = time.perf_counter() - st
                         else:
                             data = json.loads(chunk)
-
+                            # print(data)
+                            if data["interrupted"][0]:
+                                output.interrupted = data["interrupted"]
                             # NOTE: Some completion API might have a last
                             # usage summary response without a token so we
                             # want to check a token was generated
                             if data["choices"][0]["text"]:
+                                text = data["choices"][0]["text"]
+                                has_punct = bool(re.search('[,!?:;。，！？；：]', text))
                                 timestamp = time.perf_counter()
                                 # First token
                                 if ttft == 0.0:
                                     ttft = time.perf_counter() - st
                                     output.ttft = ttft
+                                
+                                if ttfs == 0.0:
+                                    if has_punct:
+                                        ttfs = time.perf_counter() - st
+                                        fst = ttfs - ttft
+                                        output.ttfs = ttfs
+                                        output.fsl = fsl
+                                        output.fst = fst
+                                    else:
+                                        fsl += 1
 
-                                # Decoding phase
+                                # Dec oding phase
                                 else:
                                     output.itl.append(timestamp -
                                                       most_recent_timestamp)

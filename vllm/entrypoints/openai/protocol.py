@@ -3,6 +3,7 @@
 import time
 from argparse import Namespace
 from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Tuple
 
 import torch
 from openai.types.chat import ChatCompletionContentPartParam
@@ -509,6 +510,8 @@ class CompletionRequest(OpenAIBaseModel):
     top_p: Optional[float] = 1.0
     user: Optional[str] = None
 
+    completion_token_ids: Optional[List[int]] = None    #在这里定义
+
     # doc: begin-completion-sampling-params
     use_beam_search: bool = False
     top_k: int = -1
@@ -622,6 +625,7 @@ class CompletionRequest(OpenAIBaseModel):
             whitespace_pattern=self.guided_whitespace_pattern)
 
         return SamplingParams.from_optional(
+            completion_token_ids=self.completion_token_ids, #在这里赋值
             n=self.n,
             best_of=self.best_of,
             presence_penalty=self.presence_penalty,
@@ -745,6 +749,7 @@ class CompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{random_uuid()}")
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
+    interrupted: Tuple[bool, float]
     model: str
     choices: List[CompletionResponseChoice]
     usage: UsageInfo
@@ -768,6 +773,8 @@ class CompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{random_uuid()}")
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
+    # feat: 添加属性
+    interrupted: Tuple[bool, float]
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)

@@ -34,7 +34,6 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, AsyncGenerator, Collection, Dict, List, Optional, Tuple
-
 import numpy as np
 from backend_request_func import (ASYNC_REQUEST_FUNCS, RequestFuncInput,
                                   RequestFuncOutput)
@@ -57,11 +56,16 @@ except ImportError:
 @dataclass
 class BenchmarkMetrics:
     completed: int
+    interrupted: int
     total_input: int
     total_output: int
     request_throughput: float
     output_throughput: float
     total_token_throughput: float
+    mean_ttfs_ms: float
+    median_ttfs_ms: float
+    std_ttfs_ms: float
+    percentiles_ttfs_ms: List[Tuple[float, float]]
     mean_ttft_ms: float
     median_ttft_ms: float
     std_ttft_ms: float
@@ -88,17 +92,18 @@ def sample_sharegpt_requests(
     num_requests: int,
     tokenizer: PreTrainedTokenizerBase,
     fixed_output_len: Optional[int] = None,
-) -> List[Tuple[str, int, int, None]]:
-    # Load the dataset.
-    with open(dataset_path, encoding='utf-8') as f:
-        dataset = json.load(f)
-    # Filter out the conversations with less than 2 turns.
-    dataset = [data for data in dataset if len(data["conversations"]) >= 2]
-    # Only keep the first two turns of each conversation.
-    dataset = [(data["conversations"][0]["value"],
-                data["conversations"][1]["value"]) for data in dataset]
+) -> List[Tuple[str, int, int, Optional[List[int]]]]:
+    # 改写一下原有格式，打开JSONL文件并逐行读取
+    with open(dataset_path, 'r', encoding='utf-8') as f:
+        dataset = []
+        for line in f:
+            data = json.loads(line)  # 解析每一行的JSON
+            # 过滤出对话轮数大于等于2的记录
+            if len(data["conversation"]) >= 1:
+                # 只保留前两轮对话
+                dataset.append(data["conversation"][0])
 
-    # Shuffle the dataset.
+    # 打乱数据集
     random.shuffle(dataset)
 
     # Filter out sequences that are too long or too short
@@ -108,9 +113,11 @@ def sample_sharegpt_requests(
             break
 
         # Tokenize the prompts and completions.
-        prompt = dataset[i][0]
+        prompt = dataset[i]["human"]    # 根据实际数据集的格式修改
         prompt_token_ids = tokenizer(prompt).input_ids
-        completion = dataset[i][1]
+        # print(f"human:{prompt}")
+        # print(f"token_id:{prompt_token_ids}")
+        completion = dataset[i]["assistant"]    # 根据实际数据集的格式修改
         completion_token_ids = tokenizer(completion).input_ids
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
@@ -121,7 +128,11 @@ def sample_sharegpt_requests(
         if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
-        filtered_dataset.append((prompt, prompt_len, output_len, None))
+        filtered_dataset.append((prompt, prompt_len, output_len, completion_token_ids))
+
+    # token_ids = [3922, 110526, 27327, 109438, 28037, 57668, 1811, 220, 220, 679, 24, 8107, 24]
+    # tokens = tokenizer.decode(token_ids)
+    # print(f"Token ID: {token_ids}, \nToken: {tokens}")
 
     return filtered_dataset
 
@@ -319,16 +330,26 @@ def calculate_metrics(
     actual_output_lens: List[int] = []
     total_input = 0
     completed = 0
+    interrupted = 0
     itls: List[float] = []
     tpots: List[float] = []
     ttfts: List[float] = []
     e2els: List[float] = []
+    ttfss: List[float] = [] # feat: 添加属性
+    fsls: List[int] = []
+    fsts: List[int] = []
+    fit: List[float] = [] # first interrupted time
+
     for i in range(len(outputs)):
         if outputs[i].success:
             # We use the tokenizer to count the number of output tokens for all
             # serving backends instead of looking at len(outputs[i].itl) since
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
+
+            if outputs[i].interrupted[0]:
+                interrupted += 1
+
             output_len = len(
                 tokenizer(outputs[i].generated_text,
                           add_special_tokens=False).input_ids)
@@ -340,6 +361,10 @@ def calculate_metrics(
             itls += outputs[i].itl
             ttfts.append(outputs[i].ttft)
             e2els.append(outputs[i].latency)
+            ttfss.append(outputs[i].ttfs)
+            fsls.append(outputs[i].fsl)
+            fsts.append(outputs[i].fst)
+            fit.append(outputs[i].interrupted[1])
             completed += 1
         else:
             actual_output_lens.append(0)
@@ -351,11 +376,18 @@ def calculate_metrics(
             stacklevel=2)
     metrics = BenchmarkMetrics(
         completed=completed,
+        interrupted=interrupted,
         total_input=total_input,
         total_output=sum(actual_output_lens),
         request_throughput=completed / dur_s,
         output_throughput=sum(actual_output_lens) / dur_s,
         total_token_throughput=(total_input + sum(actual_output_lens)) / dur_s,
+        mean_ttfs_ms=np.mean(ttfss or 0) *
+        1000,  # ttfss is empty if streaming is not supported by backend
+        std_ttfs_ms=np.std(ttfss or 0) * 1000,
+        median_ttfs_ms=np.median(ttfss or 0) * 1000,
+        percentiles_ttfs_ms=[(p, np.percentile(ttfss or 0, p) * 1000)
+                             for p in selected_percentiles],
         mean_ttft_ms=np.mean(ttfts or 0) *
         1000,  # ttfts is empty if streaming is not supported by backend
         std_ttft_ms=np.std(ttfts or 0) * 1000,
@@ -388,7 +420,7 @@ async def benchmark(
     base_url: str,
     model_id: str,
     tokenizer: PreTrainedTokenizerBase,
-    input_requests: List[Tuple[str, int, int]],
+    input_requests: List[Tuple[str, int, int, Optional[List[int]]]],
     logprobs: Optional[int],
     best_of: int,
     request_rate: float,
@@ -398,6 +430,11 @@ async def benchmark(
     selected_percentiles: List[str],
     ignore_eos: bool,
 ):
+    #print(input_requests)
+    #token_ids = [109122, 109122, 88126, 118125, 37046, 1811, 38129, 17039, 31091, 125653, 9554, 697, 2344, 109589, 75320, 9554, 3222, 107585, 21043, 91837, 2485, 1129, 641, 12591, 418, 1190, 4748, 309, 18225, 285, 1351, 501, 6973, 29, 1811, 15225, 123133, 33091, 51107, 9554, 3222, 23897, 123133, 127442, 25580, 79982, 98220, 28190, 1811, 35056, 33563, 88126, 37767, 45163, 56438, 34226, 23226, 47585, 28037, 697, 2344, 105363, 27996, 16325, 91495, 24946, 53826, 697, 2344, 98220, 28190, 109127, 34048, 9554, 2118, 117238, 863, 85284, 23897, 125169, 127442, 3968, 1091, 90147, 115397, 121022, 90147, 117238, 125653, 107585, 113961, 19000, 104908, 9554, 3222, 17905, 123133, 25580, 79982, 98220, 28190, 1811]
+    #tokens = tokenizer.decode(token_ids)
+    #print(tokens)
+    #print(haha)
     if backend in ASYNC_REQUEST_FUNCS:
         request_func = ASYNC_REQUEST_FUNCS[backend]
     else:
@@ -406,6 +443,7 @@ async def benchmark(
     print("Starting initial single prompt test run...")
     test_prompt, test_prompt_len, test_output_len, test_mm_content = (
         input_requests[0])
+    test_mm_content = None
     if backend != "openai-chat" and test_mm_content is not None:
         # multi-modal benchmark is only available on OpenAI Chat backend.
         raise ValueError(
@@ -451,15 +489,16 @@ async def benchmark(
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
     async for request in get_request(input_requests, request_rate):
-        prompt, prompt_len, output_len, mm_content = request
+        prompt, prompt_len, output_len, completion_token_ids = request
         request_func_input = RequestFuncInput(model=model_id,
                                               prompt=prompt,
                                               api_url=api_url,
                                               prompt_len=prompt_len,
                                               output_len=output_len,
+                                              completion_token_ids=completion_token_ids,    # 加入原有输出
                                               logprobs=logprobs,
                                               best_of=best_of,
-                                              multi_modal_content=mm_content,
+                                              multi_modal_content=None,
                                               ignore_eos=ignore_eos)
         tasks.append(
             asyncio.create_task(
@@ -498,6 +537,8 @@ async def benchmark(
 
     print("{s:{c}^{n}}".format(s=' Serving Benchmark Result ', n=50, c='='))
     print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
+    print("{:<40} {:<10.2f}".format("Interrupted rate(%):",
+                                    float(metrics.interrupted) / metrics.completed * 100))
     print("{:<40} {:<10.2f}".format("Benchmark duration (s):",
                                     benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
@@ -520,8 +561,12 @@ async def benchmark(
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
         "output_lens": actual_output_lens,
+        "fsls": [output.fsl for output in outputs], #添加这两个属性
+        "fsts": [output.fst for output in outputs], #计算第一句话的平均token数和decode速度
+        "ttfss": [output.ttfs for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
+        "fit": [output.interrupted[1] for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
         "errors": [output.error for output in outputs],
     }
@@ -558,6 +603,7 @@ async def benchmark(
                                             value))
             result[f"p{p_word}_{metric_attribute_name}_ms"] = value
 
+    process_one_metric("ttfs", "TTFS", "Time to First Speech")
     process_one_metric("ttft", "TTFT", "Time to First Token")
     process_one_metric("tpot", "TPOT",
                        "Time per Output Token (excl. 1st token)")
@@ -865,11 +911,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--percentile-metrics",
         type=str,
-        default="ttft,tpot,itl",
+        default="ttfs,ttft,tpot,itl",
         help="Comma-seperated list of selected metrics to report percentils. "
         "This argument specifies the metrics to report percentiles. "
         "Allowed metric names are \"ttft\", \"tpot\", \"itl\", \"e2el\". "
-        "Default value is \"ttft,tpot,itl\".")
+        "Default value is \"ttfs,ttft,tpot,itl\".")
     parser.add_argument(
         "--metric-percentiles",
         type=str,

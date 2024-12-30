@@ -328,7 +328,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
 @router.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
     generator = await completion(raw_request).create_completion(
-        request, raw_request)
+        request, raw_request)   #这个函数在serving_completion
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
                             status_code=generator.code)

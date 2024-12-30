@@ -49,7 +49,7 @@ async def generate(request: Request) -> Response:
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
-    sampling_params = SamplingParams(**request_dict)
+    sampling_params = SamplingParams(**request_dict)    #这里就会得到新的参数
     request_id = random_uuid()
 
     assert engine is not None

@@ -1,6 +1,9 @@
 """Sequence and its related classes."""
 import copy
 import enum
+import re
+import time
+
 from abc import ABC, abstractmethod
 from array import array
 from collections import defaultdict
@@ -407,6 +410,7 @@ class Sequence:
         seq_id: int,
         inputs: "SingletonInputs",
         block_size: int,
+        arrival_time: float,
         eos_token_id: Optional[int] = None,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
@@ -419,6 +423,10 @@ class Sequence:
         self.lora_request = lora_request
         self.prompt_adapter_request = prompt_adapter_request
         self.from_decoder_prompt = from_decoder_prompt
+
+        self.arrival_time = arrival_time
+        # feat: 新建记录播放是否中断的属性
+        self.interrupted: Tuple[bool, float] = (False, 0.0)
 
         # For decoder-only models, a Sequence is constructed
         # from an DecoderOnlyInputs instance (the `inputs` arg.)
@@ -462,6 +470,20 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
+        #feat: 添加completion_token_ids
+        self.completion_token_ids: Optional[List[int]] = None
+
+        self.seq_duration = 0.0  # 初始化语音总时长
+        self.first_sentence_time = time.time()
+
+    def calculate_sentence_duration(self, sentence: str) -> float:
+        k = 0.2  # 假设每个字符对应0.2秒的语音时长，这个值可以根据实际情况调整
+        return len(sentence) * k
+
+    def calculate_synthesis_duration(self, split_sentence: str) ->float:
+        # feat: 计算语音合成时长
+        k = 0.02
+        return len(split_sentence) * k
 
     @property
     def n_blocks(self) -> int:
@@ -577,8 +599,53 @@ class Sequence:
     def append_token_id(self, token_id: int, logprobs: Dict[int,
                                                             Logprob]) -> None:
         assert token_id in logprobs
+        # print(f"token_id:{token_id}")
+        # fix：上次添错地方了！
+        # 添加逻辑，如果需要对齐原有输出，则直接覆盖原来的参数
+        new_token_id = token_id
+        if (self.completion_token_ids):
+            current_pos = len(self.data.get_output_token_ids())
+            if current_pos < len(self.completion_token_ids):
+                # 替换token_id
+                new_token_id = self.completion_token_ids[current_pos]
+                # logprob = 0.0
+
+        # print(f"new_token_id:{new_token_id}")
+        # self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        if new_token_id not in logprobs:
+            logprobs[new_token_id] = Logprob(0.0)
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        self.data.append_token_id(new_token_id, logprobs[new_token_id].logprob)
+
+
+        # 获取自上次调用以来新生成的文本
+        current_output_text = self.output_text
+        #检查是否生成了新的分句
+        if self.is_sentence_end(current_output_text):
+            # print(current_output_text, self.seq_duration)
+            last_sentence = self.get_last_sentence(current_output_text)
+            synthesis_duration = self.calculate_synthesis_duration(last_sentence)
+            # print(self.seq_duration)
+            if self.seq_duration < 0.2:
+                self.first_sentence_time = time.time() + self.calculate_synthesis_duration(current_output_text)
+            elif self.seq_duration - (time.time() - self.first_sentence_time) < synthesis_duration:
+                # print(f"self.seq_duration:{self.seq_duration}, (time.time() - self.first_sentence_time):{(time.time() - self.first_sentence_time)}, synthesis_duration:{synthesis_duration}")
+                # print(current_output_text)
+                self.interrupted = (True, time.time() - self.first_sentence_time) # feat: 如果中断，将标记设为true fix: 记录播放到多少秒第一次中断
+            #计算新的完整句子的时长
+            sentence_duration = self.calculate_sentence_duration(current_output_text)
+            # 更新总语音时长
+            self.seq_duration = sentence_duration
+    
+    def get_last_sentence(self, text: str) ->str:
+        sentences = re.split(r'[,!?;:；。！？：]+', text.strip())
+        # 去除空字符串并返回最后一个分句
+        sentences = [s for s in sentences if s]  # 过滤掉空字符串
+        return sentences[-1] if sentences else ''  # 返回最后一个分句或空字符串
+
+    def is_sentence_end(self, text: str) -> bool:
+        # 检查文本是否以句号、逗号、感叹号、问号、分号或冒号结束
+        return text.endswith((',', '!', '?', ':', ';', '。', '，', '！', '？', '；', '：'))  
 
     def get_len(self) -> int:
         return self.data.get_len()
