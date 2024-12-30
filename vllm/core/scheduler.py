@@ -323,6 +323,13 @@ class Scheduler:
         
         self.max_wait_time = scheduler_config.max_wait_time
 
+        self.ttft_slo = self.scheduler_config.ttft_slo
+        self.tbt_slo = self.scheduler_config.tbt_slo
+        self.swap_overhead = 0.08  # 80ms的swap开销
+        self.decode_overhead = 0.02  # 20ms的decode开销
+        self.chunked_prefill_overhead = 0.06     # 60ms的chunked prefill开销
+        self.prefill_rate = 0.08    # 预估prefill速率
+
         version = "selfattn"
         if (self.scheduler_config.embedding_mode
                 or self.cache_config.is_attention_free):
@@ -502,6 +509,56 @@ class Scheduler:
             return 0.0
         return max(self._get_swapped_overtime(seq_group) for seq_group in self.swapped)
 
+    def _get_running_headroom(self, seq_group: SequenceGroup) -> float:
+        """计算running请求的余量
+        
+        Args:
+            seq_group: 需要计算余量的序列组
+            
+        Returns:
+            float: 时间余量(秒)。正值表示有富余,负值表示已超时
+        """
+        current_time = time.time()
+        
+        # 判断是否在prefill阶段
+        if seq_group.is_prefill():
+            # prefill阶段的计算方式
+            elapsed_time = current_time - seq_group.arrival_time
+            prompt_tokens = len(seq_group.seqs[0].prompt_token_ids)
+            num_computed = seq_group.seqs[0].num_computed_tokens
+            remaining_tokens = prompt_tokens - num_computed
+            
+            # 计算还需要多少次chunk操作
+            chunk_size = self.scheduler_config.max_num_batched_tokens
+            num_chunks = (remaining_tokens + chunk_size - 1) // chunk_size  # 向上取整
+            
+            # 计算预期剩余时间
+            elapsed_time = current_time - seq_group.arrival_time
+            expected_time = num_chunks * self.chunked_prefill_overhead
+            headroom = self.ttft_slo - (elapsed_time + expected_time)
+        
+            
+        else:
+            # decode阶段的计算方式
+            elapsed_time = current_time - seq_group.metrics.first_token_time
+            num_tokens = len(seq_group.seqs[0].output_token_ids)
+            
+            expected_time = num_tokens * self.tbt_slo
+            headroom = expected_time - (elapsed_time + self.decode_overhead)
+        
+        return headroom
+    
+    def _get_swapped_headroom(self, seq_group: SequenceGroup) -> float:
+        """计算swapped请求的余量"""
+        running_headroom = self._get_running_headroom(seq_group)
+        # 需要额外考虑swap开销
+        return running_headroom - self.swap_overhead
+    
+    def _get_most_urgent_swapped_headroom(self) -> float:
+        """获取swap队列中最紧急的余量"""
+        if not self.swapped:
+            return float('inf')
+        return min(self._get_swapped_headroom(seq_group) for seq_group in self.swapped)
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
@@ -788,8 +845,7 @@ class Scheduler:
         self.swapped = deque(sorted(
             self.swapped,
             key=lambda x: (
-                x.seqs[0].seq_duration - (time.time() - x.metrics.first_scheduled_time)
-                if x.metrics else float('inf')  # 如果没有metrics,放到最后
+                self._get_swapped_headroom(x)
             )
         ))
         swapped_queue = self.swapped
@@ -807,18 +863,8 @@ class Scheduler:
                 seq_group,
                 self._get_num_lookahead_slots(is_prefill, enable_chunking))
             if alloc_status == AllocStatus.LATER:
-                remaining_audio_time = (
-                    seq_group.seqs[0].seq_duration - 
-                    (time.time() - seq_group.metrics.first_scheduled_time)
-                    if seq_group.metrics else float('inf')
-                )
-                print(f"remaining_audio_time: {remaining_audio_time}")
-                print(f"seq_group.seqs[0].seq_duration:{seq_group.seqs[0].seq_duration}")
-                print(f"seq_group.seqs[0].output_text: {seq_group.seqs[0].output_text}")
                 # 如果剩余时间小于阈值,尝试强制恢复
-                if remaining_audio_time < 1.0:  # 可配置的阈值
-                    print(seq_group.seqs[0].seq_duration)
-                    print( (time.time() - seq_group.metrics.first_scheduled_time))
+                if self._get_swapped_headroom(seq_group) <= 0:  # 可配置的阈值
                     print("it's me! help!")
                     success, scheduled_group, preempted_seqs = self._force_swap_in_by_preemption(
                         seq_group,
@@ -836,7 +882,7 @@ class Scheduler:
                         swapped_queue.popleft()
                         decode_seq_groups.append(scheduled_group)
                         swapped_out.extend(preempted_seqs)  # 将被抢占的序列添加到swapped队列
-                break  # 无论是否成功抢占,都退出循环
+                continue    # 抢占成功后，继续处理下一个序列
 
             elif alloc_status == AllocStatus.NEVER:
                 logger.warning(
@@ -1214,22 +1260,17 @@ class Scheduler:
         self.running = deque(sorted(
             self.running,
             key=lambda x: (
-                x.seqs[0].seq_duration - 
-                (time.time() - x.metrics.first_scheduled_time)
-                if x.metrics else 0
+               self._get_running_headroom(x)
             ),
             reverse=True  # 降序,剩余时间多的优先被抢占
         ))
-        #没有确定成功抢占前，running_seqs应该和self.running不指向同一个地址
-        #running_seqs = self.running
-
-        # print(self.running)
-        # print(running_seqs)
         
         preempted_seqs = []  # 记录被抢占的序列
         running_seqs = deque(self.running)
         # 尝试抢占直到能恢复当前序列
         for victim in running_seqs:
+            if victim.is_prefill():
+                continue
             budget.subtract_num_batched_tokens(seq_group.request_id, 1) # decode一轮产生一个token
             num_running_seqs = seq_group.get_max_num_running_seqs()
             budget.subtract_num_seqs(seq_group.request_id,
@@ -1507,7 +1548,7 @@ class Scheduler:
         # Schedule swapped out requests.
         # If preemption happens, it means we don't have space for swap-in.
         if len(running_scheduled.preempted) + len(
-                running_scheduled.swapped_out) == 0:
+                running_scheduled.swapped_out) == 0 or self._get_most_urgent_swapped_headroom() <= 0:
             swapped_in = self._schedule_swapped(budget, curr_loras)
 
         # Schedule new prefills.
