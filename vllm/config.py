@@ -982,6 +982,8 @@ class SchedulerConfig:
                  embedding_mode: bool = False,
                  is_multimodal_model: bool = False,
                  preemption_mode: Optional[str] = None,
+                 ttft_slo: Optional[float] = 1.5,
+                 tbt_slo: Optional[float] = 0.1,
                  num_scheduler_steps: int = 1,
                  multi_step_stream_outputs: bool = False,
                  send_delta_data: bool = False,
@@ -1030,6 +1032,8 @@ class SchedulerConfig:
         self.chunked_prefill_enabled = enable_chunked_prefill
         self.embedding_mode = embedding_mode
         self.preemption_mode = preemption_mode
+        self.ttft_slo = ttft_slo
+        self.tbt_slo = tbt_slo
         self.num_scheduler_steps = num_scheduler_steps
         self.multi_step_stream_outputs = multi_step_stream_outputs
         self.send_delta_data = send_delta_data

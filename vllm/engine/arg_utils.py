@@ -152,6 +152,8 @@ class EngineArgs:
     model_loader_extra_config: Optional[dict] = None
     ignore_patterns: Optional[Union[str, List[str]]] = None
     preemption_mode: Optional[str] = None
+    ttft_slo: Optional[float] = 1.5
+    tbt_slo: Optional[float] = 0.1
 
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: Optional[bool] = None
@@ -766,6 +768,17 @@ class EngineArgs:
             help='If \'recompute\', the engine performs preemption by '
             'recomputing; If \'swap\', the engine performs preemption by '
             'block swapping.')
+        
+        parser.add_argument(
+            '--ttft-slo',
+            type=float,
+            default=1.5,
+            help='TTFT SLO')
+        parser.add_argument(
+            '--tbt-slo',
+            type=float,
+            default=0.1,
+            help='TBT SLO')
 
         parser.add_argument(
             "--served-model-name",
@@ -1035,6 +1048,8 @@ class EngineArgs:
             embedding_mode=model_config.embedding_mode,
             is_multimodal_model=model_config.is_multimodal_model,
             preemption_mode=self.preemption_mode,
+            ttft_slo=self.ttft_slo,
+            tbt_slo=self.tbt_slo,
             num_scheduler_steps=self.num_scheduler_steps,
             multi_step_stream_outputs=self.multi_step_stream_outputs,
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
