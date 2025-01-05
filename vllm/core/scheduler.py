@@ -552,7 +552,7 @@ class Scheduler:
         """计算swapped请求的余量"""
         running_headroom = self._get_running_headroom(seq_group)
         # 需要额外考虑swap开销
-        return running_headroom - self.swap_overhead
+        return running_headroom - 2 * self.swap_overhead
     
     def _get_most_urgent_swapped_headroom(self) -> float:
         """获取swap队列中最紧急的余量"""
@@ -868,27 +868,30 @@ class Scheduler:
                     logger.info(
                         f"Attempting force schedule for sequence {seq_group.request_id} "
                     )
-                    success, scheduled_group, preempted_seqs = self._force_swap_in_by_preemption(
+                    success, preempted_seqs = self._force_swap_in_by_preemption(
                         seq_group,
                         blocks_to_swap_in,
                         blocks_to_swap_out,
                         blocks_to_copy,
                         budget,
                         is_prefill,
-                        enable_chunking
+                        enable_chunking,
+                        prefill_seq_groups,
+                        decode_seq_groups
                     )
                     # print("Q:are you success?")
                     # print(success)
                     
                     if success:
+                        logger.info("force preempt success")
                         swapped_queue.popleft()
-                        decode_seq_groups.append(scheduled_group)
                         swapped_out.extend(preempted_seqs)  # 将被抢占的序列添加到swapped队列
+                        continue
                     else:
                         logger.warning(
                             f"Failed to force schedule sequence {seq_group.request_id} "
                         )
-                continue    # 抢占成功后，继续处理下一个序列
+                break    
 
             elif alloc_status == AllocStatus.NEVER:
                 logger.warning(
@@ -1140,6 +1143,7 @@ class Scheduler:
                     success, preempted = self._force_preempt_for_waiting_seq(
                     seq_group, blocks_to_swap_out, enable_chunking, budget, num_new_tokens)
                     if success:
+                        logger.info("force preempt success")
                         # 抢占成功,继续处理该序列
                         swapped_out.extend(preempted)
                         waiting_queue.popleft()
@@ -1151,9 +1155,7 @@ class Scheduler:
                                 token_chunk_size=num_new_tokens
                             )
                         )
-                        # fix: 增加预算
-                        budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
-                        budget.add_num_seqs(seq_group.request_id, num_new_seqs)
+
                         continue
                     else:
                         logger.warning(
@@ -1235,7 +1237,9 @@ class Scheduler:
         budget: SchedulingBudget,
         is_prefill: bool,
         enable_chunking: bool,
-    ) -> Tuple[bool, Optional[ScheduledSequenceGroup], List[SequenceGroup]]:
+        prefill_seq_groups: List[ScheduledSequenceGroup],
+        decode_seq_groups: List[ScheduledSequenceGroup]
+    ) -> Tuple[bool, List[SequenceGroup]]:
         """通过抢占running队列中的序列来强制恢复一个序列
         
         Args:
@@ -1264,8 +1268,11 @@ class Scheduler:
         
         preempted_seqs = []  # 记录被抢占的序列
         running_seqs = deque(self.running)
+        print(f"running_seqs:{len(running_seqs)}")
         # 尝试抢占直到能恢复当前序列
         for victim in running_seqs:
+            print(f"victim:{self._get_swapped_headroom(victim)}")
+            print(f"chunked_prefill_overhead:{self.chunked_prefill_overhead}")
             if self._get_swapped_headroom(victim) >= self.chunked_prefill_overhead:  # 如果当前余量已经不支持做chunked prefill,则停止抢占
                 num_running_tokens = self._get_num_new_tokens(
                     victim, SequenceStatus.RUNNING, enable_chunking, budget)
@@ -1306,17 +1313,23 @@ class Scheduler:
                     
                 self._swap_in(seq_group, blocks_to_swap_in)
                 self._append_slots(seq_group, blocks_to_copy, enable_chunking)
-                scheduled_group = ScheduledSequenceGroup(
-                    seq_group, 
-                    token_chunk_size=1
-                )
+
+                is_prefill = seq_group.is_prefill()
+                if is_prefill:
+                    prefill_seq_groups.append(
+                        ScheduledSequenceGroup(seq_group,
+                                            token_chunk_size=num_new_tokens))
+                else:
+                    decode_seq_groups.append(
+                        ScheduledSequenceGroup(seq_group, token_chunk_size=1))
+                
                 budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
                 budget.add_num_seqs(seq_group.request_id, num_new_seqs)
                 # self.running = running_seqs #确认成功以后再给self.running重新赋值
 
-                return True, scheduled_group, preempted_seqs
-                
-        return False, None, preempted_seqs
+                return True, preempted_seqs
+        print("force swap not ok")
+        return False, preempted_seqs
 
     def _force_preempt_for_waiting_seq(
         self, 
@@ -1347,31 +1360,40 @@ class Scheduler:
         running_seqs = deque(self.running)
         
         preempted_seqs = []
-        
+        print(f"running_seqs:{len(running_seqs)}")
         for victim in running_seqs:
-            if self._get_swapped_headroom(victim) < self.chunked_prefill_overhead:  # 如果当前余量已经不支持做chunked prefill,则停止抢占
-                return False, preempted_seqs
-            
-            num_running_tokens = self._get_num_new_tokens(
-                victim, SequenceStatus.RUNNING, enable_chunking, budget)
-            budget.subtract_num_batched_tokens(victim.request_id, num_running_tokens)
-            num_running_seqs = victim.get_max_num_running_seqs()
-            budget.subtract_num_seqs(victim.request_id,
-                                         num_running_seqs)
-            
-            self._preempt(victim, blocks_to_swap_out)
-            preempted_seqs.append(victim)
-            self.running.popleft()
+            print(f"victim:{self._get_swapped_headroom(victim)}")
+            print(f"chunked_prefill_overhead:{self.chunked_prefill_overhead}")
+            if self._get_swapped_headroom(victim) >= self.chunked_prefill_overhead:  # 如果当前余量已经不支持做chunked prefill,则停止抢占
+                num_running_tokens = self._get_num_new_tokens(
+                    victim, SequenceStatus.RUNNING, enable_chunking, budget)
+                budget.subtract_num_batched_tokens(victim.request_id, num_running_tokens)
+                num_running_seqs = victim.get_max_num_running_seqs()
+                budget.subtract_num_seqs(victim.request_id,
+                                            num_running_seqs)
+                
+                self._preempt(victim, blocks_to_swap_out)
+                preempted_seqs.append(victim)
+                self.running.popleft()
             
             # 检查当前资源是否足够
             if self.block_manager.can_allocate(waiting_seq) == AllocStatus.OK:
                 # fix: 加入对num_new_seqs的计算
                 num_new_seqs = waiting_seq.get_max_num_running_seqs()
+
+                print(f"num_new_tokens:{num_new_tokens}")
+                print(f"num_new_seqs:{num_new_seqs}")
+                print(f"budget.num_batched_tokens:{budget.num_batched_tokens}")
+                print(f"budget.num_curr_seqs:{budget.num_curr_seqs}")
+
                 if (num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                 num_new_seqs=num_new_seqs)):
                     return False, preempted_seqs  # 返回成功状态和被抢占的序列
-                
+                                        # fix: 增加预算
+                budget.add_num_batched_tokens(waiting_seq.request_id, num_new_tokens)
+                budget.add_num_seqs(waiting_seq.request_id, num_new_seqs)
+
                 return True, preempted_seqs  # 返回成功状态和被抢占的序列
                 
         # 如果抢占所有序列后仍无法分配,则恢复抢占的序列
@@ -1379,8 +1401,8 @@ class Scheduler:
         #     self.running.append(seq)
             # 注意:_preempt()已经处理了blocks的swap,
             # 所以这里不需要额外处理blocks的恢复
-            
-        return False, []
+        print("force preempt not ok")
+        return False, preempted_seqs
 
     def _schedule_default(self) -> SchedulerOutputs:
         """Schedule queued requests.
@@ -1561,6 +1583,11 @@ class Scheduler:
         running_scheduled = self._schedule_running(budget,
                                                    curr_loras,
                                                    enable_chunking=True)
+        # 提前恢复running队列，方便后续抢占
+        self.running.extend(
+            [s.seq_group for s in running_scheduled.decode_seq_groups])
+        self.running.extend(
+            [s.seq_group for s in running_scheduled.prefill_seq_groups])
 
         # Schedule swapped out requests.
         # If preemption happens, it means we don't have space for swap-in.
@@ -1588,26 +1615,37 @@ class Scheduler:
             [s.seq_group for s in swapped_in.decode_seq_groups])
         self.running.extend(
             [s.seq_group for s in swapped_in.prefill_seq_groups])
-        self.running.extend(
-            [s.seq_group for s in running_scheduled.decode_seq_groups])
-        self.running.extend(
-            [s.seq_group for s in running_scheduled.prefill_seq_groups])
+
         self.running.extend([s.seq_group for s in prefills.seq_groups])
 
         # Update swapped requests.
-        self.swapped.extend(running_scheduled.swapped_out)
+        self.swapped.extend(running_scheduled.swapped_out+prefills.swapped_out+swapped_in.swapped_out)
+
+        filtered_decode_groups = [
+            group for group in running_scheduled.decode_seq_groups
+            if not any(seq.status == SequenceStatus.SWAPPED 
+                    for seq in group.seq_group.get_seqs())
+        ]
+        
+        filtered_prefill_groups = [
+            group for group in running_scheduled.prefill_seq_groups
+            if not any(seq.status == SequenceStatus.SWAPPED 
+                    for seq in group.seq_group.get_seqs())
+        ]
         return SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
-                                  running_scheduled.prefill_seq_groups +
+                                  filtered_prefill_groups +
                                   swapped_in.prefill_seq_groups +
-                                  running_scheduled.decode_seq_groups +
+                                  filtered_decode_groups +
                                   swapped_in.decode_seq_groups),
             num_prefill_groups=(len(prefills.seq_groups) +
                                 len(swapped_in.prefill_seq_groups) +
-                                len(running_scheduled.prefill_seq_groups)),
+                                len(filtered_prefill_groups)),
             num_batched_tokens=budget.num_batched_tokens,
             blocks_to_swap_in=swapped_in.blocks_to_swap_in,
-            blocks_to_swap_out=running_scheduled.blocks_to_swap_out,
+            blocks_to_swap_out=(running_scheduled.blocks_to_swap_out +
+                                 prefills.blocks_to_swap_out +
+                                 swapped_in.blocks_to_swap_out),
             blocks_to_copy=running_scheduled.blocks_to_copy +
             swapped_in.blocks_to_copy,
             ignored_seq_groups=prefills.ignored_seq_groups +
