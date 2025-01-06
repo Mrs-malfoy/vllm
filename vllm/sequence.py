@@ -1,6 +1,7 @@
 """Sequence and its related classes."""
 import copy
 import enum
+import random
 import re
 import time
 
@@ -426,7 +427,7 @@ class Sequence:
 
         self.arrival_time = arrival_time
         # feat: 新建记录播放是否中断的属性
-        self.interrupted: Tuple[bool, float] = (False, 0.0)
+        self.interrupted: Tuple[bool, bool, float] = (False, True, 0.0)
 
         # For decoder-only models, a Sequence is constructed
         # from an DecoderOnlyInputs instance (the `inputs` arg.)
@@ -644,7 +645,9 @@ class Sequence:
             elif self.seq_duration - (time.time() - self.first_sentence_time) < synthesis_duration:
                 print(f"self.seq_duration:{self.seq_duration}, (time.time() - self.first_sentence_time):{(time.time() - self.first_sentence_time)}, synthesis_duration:{synthesis_duration}")
                 print(current_output_text)
-                self.interrupted = (True, time.time() - self.first_sentence_time) # feat: 如果中断，将标记设为true fix: 记录播放到多少秒第一次中断
+                # self.interrupted[0] = True
+                # self.interrupted[2] = time.time() - self.first_sentence_time # feat: 如果中断，将标记设为true fix: 记录播放到多少秒第一次中断
+                self.interrupted = (True, self.interrupted[1], time.time() - self.first_sentence_time)
             #计算新的完整句子的时长
             sentence_duration = self.calculate_sentence_duration(current_output_text)
             # 更新总语音时长
@@ -765,6 +768,23 @@ class SequenceGroup:
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         priority: int = 0,
     ) -> None:
+        # 随机分配服务等级(1-3)
+        self.slo_class = random.randint(1, 3)
+        
+        # 根据服务等级设置SLO参数
+        if self.slo_class == 1:
+            # 高优先级：严格的TTFT，宽松的TBT
+            self.ttft_slo = 1.5  # 首token响应时间要求1.5秒
+            self.tbt_slo = 0.1   # 每token生成时间要求0.1秒
+        elif self.slo_class == 2:
+            # 中优先级：宽松的TTFT，严格的TBT
+            self.ttft_slo = 5.0   # 首token响应时间要求5秒
+            self.tbt_slo = 0.05   # 每token生成时间要求0.05秒
+        else:  # class 3
+            # 低优先级：平衡的TTFT和TBT
+            self.ttft_slo = 3.0    # 首token响应时间要求3秒
+            self.tbt_slo = 0.075   # 每token生成时间要求0.075秒
+
         self.request_id = request_id
         self.seqs = seqs
         self.arrival_time = arrival_time
@@ -896,6 +916,8 @@ class SequenceGroup:
         if (self.metrics.first_token_time is None
                 and self.seqs[0].get_output_len() == 1):
             self.metrics.first_token_time = time
+            if self.ttft_slo < self.metrics.first_token_time - self.arrival_time:
+                self.seqs[0].interrupted = (self.seqs[0].interrupted[0], False, self.seqs[0].interrupted[2])
 
     def maybe_set_first_scheduled_time(self, time: float) -> None:
         """Sets the first scheduled time and time in queue for Request

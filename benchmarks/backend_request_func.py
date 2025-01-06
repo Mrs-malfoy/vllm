@@ -36,7 +36,7 @@ class RequestFuncInput:
 
 @dataclass
 class RequestFuncOutput:
-    interrupted: Tuple[bool, float] = (False, 0.0)
+    interrupted: Tuple[bool, bool, float] = (False, True, 0.0)
     generated_text: str = ""
     success: bool = False
     latency: float = 0.0

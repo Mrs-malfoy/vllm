@@ -533,7 +533,7 @@ class Scheduler:
             # 计算预期剩余时间
             elapsed_time = current_time - seq_group.arrival_time
             expected_time = num_chunks * self.chunked_prefill_overhead
-            headroom = self.ttft_slo - (elapsed_time + expected_time)
+            headroom = seq_group.ttft_slo - (elapsed_time + expected_time)
         
             
         else:
@@ -543,7 +543,7 @@ class Scheduler:
             elapsed_time = current_time - seq_group.metrics.first_token_time
             num_tokens = seq_group.seqs[0].get_output_len()
             
-            expected_time = num_tokens * self.tbt_slo
+            expected_time = num_tokens * seq_group.tbt_slo
             headroom = expected_time - (elapsed_time + self.decode_overhead)
         
         return headroom
@@ -1085,6 +1085,12 @@ class Scheduler:
         blocks_to_swap_out: List[Tuple[int, int]] = []
         swapped_out: List[SequenceGroup] = []
 
+        self.waiting = deque(sorted(
+            self.waiting,
+            key=lambda x: (
+                self._get_running_headroom(x)
+            )
+        ))
         waiting_queue = self.waiting
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
