@@ -57,6 +57,7 @@ except ImportError:
 class BenchmarkMetrics:
     completed: int
     interrupted: int
+    goodput: int
     total_input: int
     total_output: int
     request_throughput: float
@@ -330,6 +331,7 @@ def calculate_metrics(
     actual_output_lens: List[int] = []
     total_input = 0
     completed = 0
+    goodput_count = 0
     interrupted = 0
     itls: List[float] = []
     tpots: List[float] = []
@@ -350,6 +352,9 @@ def calculate_metrics(
             if outputs[i].interrupted[0]:
                 interrupted += 1
 
+            if not outputs[i].interrupted[0] and outputs[i].interrupted[1]:
+                goodput_count += 1
+
             output_len = len(
                 tokenizer(outputs[i].generated_text,
                           add_special_tokens=False).input_ids)
@@ -364,7 +369,7 @@ def calculate_metrics(
             ttfss.append(outputs[i].ttfs)
             fsls.append(outputs[i].fsl)
             fsts.append(outputs[i].fst)
-            fit.append(outputs[i].interrupted[1])
+            fit.append(outputs[i].interrupted[2])
             completed += 1
         else:
             actual_output_lens.append(0)
@@ -377,6 +382,7 @@ def calculate_metrics(
     metrics = BenchmarkMetrics(
         completed=completed,
         interrupted=interrupted,
+        goodput=goodput_count/dur_s,
         total_input=total_input,
         total_output=sum(actual_output_lens),
         request_throughput=completed / dur_s,
@@ -546,6 +552,8 @@ async def benchmark(
                                  metrics.total_output))
     print("{:<40} {:<10.2f}".format("Request throughput (req/s):",
                                     metrics.request_throughput))
+    print("{:<40} {:<10.2f}".format("Request goodput (req/s):",
+                                    metrics.goodput))
     print("{:<40} {:<10.2f}".format("Output token throughput (tok/s):",
                                     metrics.output_throughput))
     print("{:<40} {:<10.2f}".format("Total Token throughput (tok/s):",
@@ -554,6 +562,8 @@ async def benchmark(
     result = {
         "duration": benchmark_duration,
         "completed": metrics.completed,
+        "interrupted": metrics.interrupted,
+        "goodput": metrics.goodput,
         "total_input_tokens": metrics.total_input,
         "total_output_tokens": metrics.total_output,
         "request_throughput": metrics.request_throughput,
@@ -566,7 +576,7 @@ async def benchmark(
         "ttfss": [output.ttfs for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
-        "fit": [output.interrupted[1] for output in outputs],
+        "fit": [output.interrupted[2] for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
         "errors": [output.error for output in outputs],
     }

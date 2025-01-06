@@ -258,11 +258,11 @@ class OpenAIServingCompletion(OpenAIServing):
         has_echoed = [False] * num_choices * num_prompts
         num_prompt_tokens = [0] * num_prompts
 
-        interrupted = (False, 0.0)
+        interrupted = (False, True, 0.0)
 
         try:
             async for prompt_idx, res in result_generator:
-                if res.finished and res.interrupted[0]:
+                if res.finished:
                     interrupted = res.interrupted
 
                 prompt_token_ids = res.prompt_token_ids
@@ -408,7 +408,7 @@ class OpenAIServingCompletion(OpenAIServing):
         num_prompt_tokens = 0
         num_generated_tokens = 0
 
-        interrupted = (False, 0.0)
+        interrupted = (False, True, 0.0)
 
         for final_res in final_res_batch:
             # feat: 给interrupted赋值

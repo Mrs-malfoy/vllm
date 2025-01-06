@@ -408,6 +408,140 @@ class Scheduler:
         """The number of new tokens."""
         return 1
 
+    def _should_force_schedule(self, seq_group: SequenceGroup, alloc_status: AllocStatus) -> bool:
+        """检查序列组是否需要强制调度
+        
+        Args:
+            seq_group: 待检查的序列组
+            alloc_status: 资源分配状态
+            
+        Returns:
+            bool: 是否需要强制调度
+        """
+        # 只对LATER状态的序列进行强制调度检查
+        if alloc_status != AllocStatus.LATER:
+            return False
+            
+        current_time = time.time()
+        wait_time = current_time - seq_group.arrival_time
+
+        prompt_tokens_len = len(seq_group.seqs[0].prompt_token_ids)
+
+        return wait_time + 0.46824 + (9.6e-5) * prompt_tokens_len > self.max_wait_time
+
+    def _get_waiting_overtime(self, seq_group: SequenceGroup) -> float:
+        """计算waiting队列中序列组的超时时长
+        
+        Args:
+            seq_group: 待检查的序列组
+            alloc_status: 资源分配状态
+            
+        Returns:
+            float: 超出阈值的时长(秒),如果未超时则返回0
+        """
+        current_time = time.time()
+        wait_time = current_time - seq_group.arrival_time
+        
+        # 计算预期等待时间
+        prompt_tokens_len = len(seq_group.seqs[0].prompt_token_ids)
+        expected_wait = 0.46824 + (9.6e-5) * prompt_tokens_len
+        
+        # 计算超出阈值的时长
+        overtime = wait_time + expected_wait - self.max_wait_time
+        
+        return max(0.0, overtime)
+
+    def _get_swapped_overtime(self, seq_group: SequenceGroup) -> float:
+        """计算swap队列中序列组的超时时长
+        
+        Args:
+            seq_group: 待检查的序列组
+            
+        Returns:
+            float: 超出阈值的时长(秒),如果未超时则返回0
+        """
+        if seq_group.is_finished():
+            return 0.0
+        
+        if not seq_group.metrics or not seq_group.metrics.first_scheduled_time:
+            return 0.0
+            
+        current_time = time.time()
+        # 计算剩余可播放时间
+        remaining_audio_time = (
+            seq_group.seqs[0].seq_duration - 
+            (current_time - seq_group.metrics.first_scheduled_time)
+        )
+        
+        # 如果剩余时间小于1秒则认为超时
+        # 这里的1.0是一个阈值,可以根据需要调整
+        overtime = 0.18 - remaining_audio_time
+        
+        return max(0.0, overtime)
+
+    def _get_most_urgent_waiting_overtime(self) -> float:
+        """获取waiting队列中最紧急的超时时长"""
+        if not self.waiting:
+            return 0.0
+        return self._get_waiting_overtime(self.waiting[0])
+
+    def _get_most_urgent_swapped_overtime(self) -> float:
+        """获取swap队列中最紧急的超时时长"""
+        if not self.swapped:
+            return 0.0
+        return max(self._get_swapped_overtime(seq_group) for seq_group in self.swapped)
+
+    def _get_running_headroom(self, seq_group: SequenceGroup) -> float:
+        """计算running请求的余量
+        
+        Args:
+            seq_group: 需要计算余量的序列组
+            
+        Returns:
+            float: 时间余量(秒)。正值表示有富余,负值表示已超时
+        """
+        current_time = time.time()
+        
+        # 判断是否在prefill阶段
+        if seq_group.is_prefill():
+            # prefill阶段的计算方式
+            elapsed_time = current_time - seq_group.arrival_time
+            remaining_tokens = seq_group.get_num_uncomputed_tokens()
+            
+            # 计算还需要多少次chunk操作
+            chunk_size = self.scheduler_config.max_num_batched_tokens
+            num_chunks = (remaining_tokens + chunk_size - 1) // chunk_size  # 向上取整
+            
+            # 计算预期剩余时间
+            elapsed_time = current_time - seq_group.arrival_time
+            expected_time = num_chunks * self.chunked_prefill_overhead
+            headroom = seq_group.ttft_slo - (elapsed_time + expected_time)
+        
+            
+        else:
+            # decode阶段的计算方式
+            if seq_group.metrics.first_token_time is None:
+                return 0
+            elapsed_time = current_time - seq_group.metrics.first_token_time
+            num_tokens = seq_group.seqs[0].get_output_len()
+            
+            expected_time = num_tokens * seq_group.tbt_slo
+            headroom = expected_time - (elapsed_time + self.decode_overhead)
+        
+        return headroom
+    
+    def _get_swapped_headroom(self, seq_group: SequenceGroup) -> float:
+        """计算swapped请求的余量"""
+        running_headroom = self._get_running_headroom(seq_group)
+        # 需要额外考虑swap开销
+        return running_headroom - 2 * self.swap_overhead
+    
+    def _get_most_urgent_swapped_headroom(self) -> float:
+        """获取swap队列中最紧急的余量"""
+        if not self.swapped:
+            return float('inf')
+        return min(self._get_swapped_headroom(seq_group) for seq_group in self.swapped)
+
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
         self.waiting.append(seq_group)
@@ -873,6 +1007,12 @@ class Scheduler:
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []
 
+        self.waiting = deque(sorted(
+            self.waiting,
+            key=lambda x: (
+                self._get_running_headroom(x)
+            )
+        ))
         waiting_queue = self.waiting
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
