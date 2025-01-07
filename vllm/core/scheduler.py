@@ -1007,12 +1007,6 @@ class Scheduler:
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []
 
-        self.waiting = deque(sorted(
-            self.waiting,
-            key=lambda x: (
-                self._get_running_headroom(x)
-            )
-        ))
         waiting_queue = self.waiting
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
