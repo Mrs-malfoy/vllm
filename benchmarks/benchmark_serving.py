@@ -301,6 +301,22 @@ def sample_random_requests(
 
     return input_requests
 
+def sample_burstgpt_requests(
+    input_lens: List[int],
+    output_lens: List[int],
+    num_prompts: int,
+    tokenizer: PreTrainedTokenizerBase,
+) -> List[Tuple[str, int, int]]:
+    offsets = np.random.randint(0, tokenizer.vocab_size, size=num_prompts)
+    input_requests = []
+    for i in range(num_prompts):
+        prompt = tokenizer.decode([(offsets[i] + i + j) % tokenizer.vocab_size
+                                   for j in range(input_lens[i])])
+
+        input_requests.append((prompt, int(input_lens[i]),
+                               int(output_lens[i]), None))
+
+    return input_requests
 
 async def get_request(
     input_requests: List[Tuple[str, int, int]],
@@ -315,7 +331,7 @@ async def get_request(
         timestamps = timestamps[:req_len]
         # 使用提供的时间戳
         for request, timestamp in zip(input_requests, timestamps):
-            timestamp = timestamp
+            timestamp = timestamp / 100
             current_time = time.time()
             wait_time = timestamp - (current_time - start_time)
             
@@ -699,6 +715,13 @@ def main(args: argparse.Namespace):
     tokenizer = get_tokenizer(tokenizer_id,
                               trust_remote_code=args.trust_remote_code)
 
+
+    timestamps = None
+    if args.timestamp_file:
+        timestamps, input_tokens, output_tokens = load_timestamps_from_csv(args.timestamp_file)
+        # input_requests = [(prompt, prompt_len, output_len, None)
+        #                   for prompt, prompt_len, output_len in zip(input_requests, input_tokens, output_tokens)]
+
     if args.dataset is not None:
         warnings.warn(
             "The '--dataset' argument will be deprecated in the next "
@@ -769,15 +792,15 @@ def main(args: argparse.Namespace):
             range_ratio=args.random_range_ratio,
             tokenizer=tokenizer,
         )
-
+    elif args.dataset_name == "burstgpt":
+        input_requests = sample_burstgpt_requests(
+            input_lens=input_tokens,
+            output_lens=output_tokens,
+            num_prompts=args.num_prompts,
+            tokenizer=tokenizer,
+        )
     else:
         raise ValueError(f"Unknown dataset: {args.dataset_name}")
-
-    timestamps = None
-    if args.timestamp_file:
-        timestamps, input_tokens, output_tokens = load_timestamps_from_csv(args.timestamp_file)
-        # input_requests = [(prompt, prompt_len, output_len, None)
-        #                   for prompt, prompt_len, output_len in zip(input_requests, input_tokens, output_tokens)]
 
     benchmark_result = asyncio.run(
         benchmark(
