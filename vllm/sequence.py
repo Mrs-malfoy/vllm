@@ -782,8 +782,8 @@ class SequenceGroup:
         # 根据服务等级设置SLO参数
         if self.slo_class == 1:
             # 高优先级：严格的TTFT，宽松的TBT
-            self.ttft_slo = 1.5  # 首token响应时间要求1.5秒
-            self.tbt_slo = 0.1   # 每token生成时间要求0.1秒
+            self.ttft_slo = 1.08  # 首token响应时间要求1.5秒
+            self.tbt_slo = 0.475   # 每token生成时间要求0.1秒
         elif self.slo_class == 2:
             # 中优先级：宽松的TTFT，严格的TBT
             self.ttft_slo = 5.0   # 首token响应时间要求5秒
