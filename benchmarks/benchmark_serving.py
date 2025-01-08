@@ -305,20 +305,37 @@ def sample_random_requests(
 
 async def get_request(
     input_requests: List[Tuple[str, int, int]],
+    timestamps: Optional[List[float]],
     request_rate: float,
 ) -> AsyncGenerator[Tuple[str, int, int], None]:
+    start_time = time.time()
+    req_len = len(input_requests)
     input_requests = iter(input_requests)
-    for request in input_requests:
-        yield request
+    
+    if timestamps is not None:
+        timestamps = timestamps[:req_len]
+        # 使用提供的时间戳
+        for request, timestamp in zip(input_requests, timestamps):
+            timestamp = timestamp
+            current_time = time.time()
+            wait_time = timestamp - (current_time - start_time)
+            
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            
+            yield request
+    else:
+        for request in input_requests:
+            yield request
 
-        if request_rate == float("inf"):
-            # If the request rate is infinity, then we don't need to wait.
-            continue
+            if request_rate == float("inf"):
+                # If the request rate is infinity, then we don't need to wait.
+                continue
 
-        # Sample the request interval from the exponential distribution.
-        interval = np.random.exponential(1.0 / request_rate)
-        # The next request will be sent after the interval.
-        await asyncio.sleep(interval)
+            # Sample the request interval from the exponential distribution.
+            interval = np.random.exponential(1.0 / request_rate)
+            # The next request will be sent after the interval.
+            await asyncio.sleep(interval)
 
 
 def calculate_metrics(
@@ -427,6 +444,7 @@ async def benchmark(
     model_id: str,
     tokenizer: PreTrainedTokenizerBase,
     input_requests: List[Tuple[str, int, int, Optional[List[int]]]],
+    timestamps: Optional[List[float]],
     logprobs: Optional[int],
     best_of: int,
     request_rate: float,
@@ -494,7 +512,7 @@ async def benchmark(
 
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
-    async for request in get_request(input_requests, request_rate):
+    async for request in get_request(input_requests, timestamps, request_rate):
         prompt, prompt_len, output_len, completion_token_ids = request
         request_func_input = RequestFuncInput(model=model_id,
                                               prompt=prompt,
@@ -624,6 +642,19 @@ async def benchmark(
 
     return result
 
+import pandas as pd
+
+def load_timestamps_from_csv(file_path: str) -> Tuple[List[float], List[int], List[int]]:
+    """
+    加载CSV文件中的时间戳和token信息
+    返回: (时间戳列表, 输入token数列表, 期望输出token数列表)
+    """
+    df = pd.read_csv(file_path)
+    timestamps = df['Timestamp'].tolist()
+    input_tokens = df['Request tokens'].tolist()
+    output_tokens = df['Response tokens'].tolist()
+    return timestamps, input_tokens, output_tokens
+
 
 def main(args: argparse.Namespace):
     print(args)
@@ -718,6 +749,12 @@ def main(args: argparse.Namespace):
     else:
         raise ValueError(f"Unknown dataset: {args.dataset_name}")
 
+    timestamps = None
+    if args.timestamp_file:
+        timestamps, input_tokens, output_tokens = load_timestamps_from_csv(args.timestamp_file)
+        # input_requests = [(prompt, prompt_len, output_len, None)
+        #                   for prompt, prompt_len, output_len in zip(input_requests, input_tokens, output_tokens)]
+
     benchmark_result = asyncio.run(
         benchmark(
             backend=backend,
@@ -726,6 +763,7 @@ def main(args: argparse.Namespace):
             model_id=model_id,
             tokenizer=tokenizer,
             input_requests=input_requests,
+            timestamps=timestamps,
             logprobs=args.logprobs,
             best_of=args.best_of,
             request_rate=args.request_rate,
@@ -934,6 +972,11 @@ if __name__ == "__main__":
         "To report 25-th, 50-th, and 75-th percentiles, use \"25,50,75\". "
         "Default value is \"99\". "
         "Use \"--percentile-metrics\" to select metrics.",
+    )
+    parser.add_argument(
+        "--timestamp-file",
+        type=str,
+        help="Path to CSV file containing request timestamps and token counts",
     )
 
     # group for dataset specific arguments
