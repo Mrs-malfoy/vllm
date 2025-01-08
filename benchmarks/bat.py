@@ -8,7 +8,7 @@ def run_benchmark(request_rate, run_number):
         --dataset-path filtered_output.jsonl \
         --model Rookie/Llama-3-8B-Instruct-Chinese \
         --ignore-eos \
-        --num-prompts 3000 \
+        --num-prompts {900 * request_rate} \
         --request-rate {request_rate} \
         --save-result"""
     
@@ -22,8 +22,8 @@ def run_benchmark(request_rate, run_number):
 
 def main():
     # 定义要测试的request-rate值
-    rates = [6.5, 7, 7.5, 8.5, 9, 9.5]  # 可以根据需要修改
-    runs_per_rate = 5  # 每个速率测试5次
+    rates = [6, 8, 10, 12, 14]  # 可以根据需要修改
+    runs_per_rate = 1  # 每个速率测试5次
     
     for rate in rates:
         for run in range(1, runs_per_rate + 1):
