@@ -1320,6 +1320,11 @@ class LLMEngine:
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
 
+
+        # 记录开始时间
+        start_time = time.perf_counter()
+        scheduler_time = 0
+
         # For llm_engine, there is no pipeline parallel support, so the engine
         # used is always 0.
         virtual_engine = 0
@@ -1344,6 +1349,34 @@ class LLMEngine:
             (seq_group_metadata_list, scheduler_outputs,
              allow_async_output_proc
              ) = self.scheduler[virtual_engine].schedule()
+            
+            # 记录调度用时
+            end_time1 = time.perf_counter()
+            scheduler_time = end_time1 - start_time
+
+            logger.info(f"swapin: {scheduler_outputs.blocks_to_swap_in}")
+            logger.info(f"swapout: {scheduler_outputs.blocks_to_swap_out}")
+
+            count_decode = 0
+            count_prefill = 0
+            total_new_token = 0
+            running_blocks = []
+            for sg in scheduler_outputs.scheduled_seq_groups:
+                seq = sg.seq_group.seqs[0]
+                if(seq.seq_id in self.scheduler[0].block_manager.block_tables):
+                    running_blocks.extend(self.scheduler[0].block_manager.get_block_table(seq))
+                else:
+                    logger.info(f"seq_id: {seq.seq_id} not in block_tables")
+                if sg.seq_group.is_prefill():
+                    count_prefill += 1
+                    total_new_token += sg.token_chunk_size
+                    logger.info(f"chunked prefill size: {sg.token_chunk_size}")
+                else:
+                    count_decode += 1
+                    total_new_token += 1
+
+            logger.info(f"using: {running_blocks}")
+
 
             ctx.seq_group_metadata_list = seq_group_metadata_list
             ctx.scheduler_outputs = scheduler_outputs
@@ -1392,6 +1425,31 @@ class LLMEngine:
 
             outputs = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
+            end_time2 = time.perf_counter()
+            execute_model_time = end_time2 - end_time1
+            
+            # logger.info(f"Schedule iteration took {scheduler_time:.4f} seconds"
+                        # f"Execute model took {execute_model_time:.4f} seconds")
+
+            # 计算GPU和CPU的缓存使用率
+            # print(self.scheduler)
+            if(len(self.scheduler) > 1):
+                print(self.scheduler)
+            
+            gpu_cache_usage = 0.0
+            for scheduler in self.scheduler:
+                if scheduler.block_manager.num_total_gpu_blocks is not None:
+                    num_free_gpu = scheduler.block_manager.get_num_free_gpu_blocks()
+                    gpu_cache_usage = 1.0 - (num_free_gpu / scheduler.block_manager.num_total_gpu_blocks)
+
+            cpu_cache_usage = 0.0
+            for scheduler in self.scheduler:
+                if scheduler.block_manager.num_total_cpu_blocks is not None and scheduler.block_manager.num_total_cpu_blocks > 0:
+                    num_free_cpu = scheduler.block_manager.get_num_free_cpu_blocks()
+                    cpu_cache_usage = 1.0 - (num_free_cpu / scheduler.block_manager.num_total_cpu_blocks)
+            
+            logger.info(f"Schedule stats - decode:{count_decode}, prefill:{count_prefill}, total_new_token:{total_new_token}, swap:{len(scheduler_outputs.blocks_to_swap_in) + len(scheduler_outputs.blocks_to_swap_out)}, scheduler_time:{scheduler_time:.4f}, exec_time:{execute_model_time:.4f}, c_mem_use:{cpu_cache_usage}, g_mem_use:{gpu_cache_usage}")
+
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
