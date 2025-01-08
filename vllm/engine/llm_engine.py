@@ -1404,13 +1404,17 @@ class LLMEngine:
                         # f"Execute model took {execute_model_time:.4f} seconds")
             count_decode = 0
             count_prefill = 0
+            total_new_token = 0
             for sg in scheduler_outputs.scheduled_seq_groups:
                 if sg.seq_group.is_prefill():
                     count_prefill += 1
+                    total_new_token += sg.token_chunk_size
+                    logger.info(f"chunked prefill size: {sg.token_chunk_size}")
                 else:
                     count_decode += 1
+                    total_new_token += 1
 
-            logger.info(f"Schedule stats - decode:{count_decode}, prefill:{count_prefill}, swap:{len(scheduler_outputs.blocks_to_swap_in) + len(scheduler_outputs.blocks_to_swap_out)}, scheduler_time:{scheduler_time:.4f}, exec_time:{execute_model_time:.4f}")
+            logger.info(f"Schedule stats - decode:{count_decode}, prefill:{count_prefill}, total_new_token:{total_new_token}, swap:{len(scheduler_outputs.blocks_to_swap_in) + len(scheduler_outputs.blocks_to_swap_out)}, scheduler_time:{scheduler_time:.4f}, exec_time:{execute_model_time:.4f}")
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
