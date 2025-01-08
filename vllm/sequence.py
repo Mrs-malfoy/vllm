@@ -426,6 +426,8 @@ class Sequence:
         self.from_decoder_prompt = from_decoder_prompt
 
         self.arrival_time = arrival_time
+        self.first_token_time = None
+        self.tbt_slo = 0.1
         # feat: 新建记录播放是否中断的属性
         self.interrupted: Tuple[bool, bool, float] = (False, True, 0.0)
 
@@ -618,27 +620,39 @@ class Sequence:
         self.output_logprobs.append(logprobs)
         self.data.append_token_id(new_token_id, logprobs[new_token_id].logprob)
 
+        if self.first_token_time is not None:
+            elapsed_time = time.time() - self.first_token_time
+            num_tokens = self.get_output_len()
+            expected_time = num_tokens * self.tbt_slo
+            headroom = expected_time - elapsed_time
+            if headroom < 0:
+                self.interrupted = (True, self.interrupted[1], elapsed_time)
+        #self.seq_duration = 1.0
+        # print(self.output_text)
 
         # 获取自上次调用以来新生成的文本
-        current_output_text = self.output_text
-        #检查是否生成了新的分句
-        if self.is_sentence_end(current_output_text):
-            # print(current_output_text, self.seq_duration)
-            last_sentence = self.get_last_sentence(current_output_text)
-            synthesis_duration = self.calculate_synthesis_duration(last_sentence)
-            # print(self.seq_duration)
-            if self.seq_duration < 0.2:
-                self.first_sentence_time = time.time() + self.calculate_synthesis_duration(current_output_text)
-            elif self.seq_duration - (time.time() - self.first_sentence_time) < synthesis_duration:
-                print(f"self.seq_duration:{self.seq_duration}, (time.time() - self.first_sentence_time):{(time.time() - self.first_sentence_time)}, synthesis_duration:{synthesis_duration}")
-                print(current_output_text)
-                # self.interrupted[0] = True
-                # self.interrupted[2] = time.time() - self.first_sentence_time # feat: 如果中断，将标记设为true fix: 记录播放到多少秒第一次中断
-                self.interrupted = (True, self.interrupted[1], time.time() - self.first_sentence_time)
-            #计算新的完整句子的时长
-            sentence_duration = self.calculate_sentence_duration(current_output_text)
-            # 更新总语音时长
-            self.seq_duration = sentence_duration
+        # current_output_text = self.output_text
+        # # if current_output_text.startswith("当然可以“万教"):
+        # #     print(f"current_output_text:{current_output_text}")
+        # #     print(f"self.seq_duration:{self.seq_duration}")
+        # #检查是否生成了新的分句
+        # if self.is_sentence_end(current_output_text):
+        #     # print(current_output_text, self.seq_duration)
+        #     last_sentence = self.get_last_sentence(current_output_text)
+        #     synthesis_duration = self.calculate_synthesis_duration(last_sentence)
+        #     # print(self.seq_duration)
+        #     if self.seq_duration < 0.2:
+        #         self.first_sentence_time = time.time() + self.calculate_synthesis_duration(current_output_text)
+        #     elif self.seq_duration - (time.time() - self.first_sentence_time) < synthesis_duration:
+        #         print(f"self.seq_duration:{self.seq_duration}, (time.time() - self.first_sentence_time):{(time.time() - self.first_sentence_time)}, synthesis_duration:{synthesis_duration}")
+        #         print(current_output_text)
+        #         # self.interrupted[0] = True
+        #         # self.interrupted[2] = time.time() - self.first_sentence_time # feat: 如果中断，将标记设为true fix: 记录播放到多少秒第一次中断
+        #         self.interrupted = (True, self.interrupted[1], time.time() - self.first_sentence_time)
+        #     #计算新的完整句子的时长
+        #     sentence_duration = self.calculate_sentence_duration(current_output_text)
+        #     # 更新总语音时长
+        #     self.seq_duration = sentence_duration
     
     def get_last_sentence(self, text: str) ->str:
         sentences = re.split(r'[,!?;:；。！？：]+', text.strip())
@@ -751,7 +765,7 @@ class SequenceGroup:
     ) -> None:
         # 随机分配服务等级(1-3)
         self.slo_class = random.randint(1, 3)
-        
+        self.slo_class = 1
         # 根据服务等级设置SLO参数
         if self.slo_class == 1:
             # 高优先级：严格的TTFT，宽松的TBT
@@ -897,6 +911,7 @@ class SequenceGroup:
         if (self.metrics.first_token_time is None
                 and self.seqs[0].get_output_len() == 1):
             self.metrics.first_token_time = time
+            self.seqs[0].first_token_time = time
             if self.ttft_slo < self.metrics.first_token_time - self.arrival_time:
                 self.seqs[0].interrupted = (self.seqs[0].interrupted[0], False, self.seqs[0].interrupted[2])
 
