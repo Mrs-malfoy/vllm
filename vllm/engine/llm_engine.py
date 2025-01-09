@@ -1354,8 +1354,8 @@ class LLMEngine:
             end_time1 = time.perf_counter()
             scheduler_time = end_time1 - start_time
 
-            logger.info(f"swapin: {scheduler_outputs.blocks_to_swap_in}")
-            logger.info(f"swapout: {scheduler_outputs.blocks_to_swap_out}")
+            # logger.info(f"swapin: {scheduler_outputs.blocks_to_swap_in}")
+            # logger.info(f"swapout: {scheduler_outputs.blocks_to_swap_out}")
 
             count_decode = 0
             count_prefill = 0
@@ -1370,12 +1370,12 @@ class LLMEngine:
                 if sg.seq_group.is_prefill():
                     count_prefill += 1
                     total_new_token += sg.token_chunk_size
-                    logger.info(f"chunked prefill size: {sg.token_chunk_size}")
+                    # logger.info(f"chunked prefill size: {sg.token_chunk_size}")
                 else:
                     count_decode += 1
                     total_new_token += 1
 
-            logger.info(f"using: {running_blocks}")
+            # logger.info(f"using: {running_blocks}")
 
 
             ctx.seq_group_metadata_list = seq_group_metadata_list
