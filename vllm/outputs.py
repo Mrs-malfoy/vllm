@@ -99,7 +99,7 @@ class RequestOutput:
         prompt_logprobs: Optional[PromptLogprobs],
         outputs: List[CompletionOutput],
         finished: bool,
-        interrupted: Optional[Tuple[bool, bool, float]] = (False, True, 0.0), # fix: 把类型改为元组，添加第一次中断属性；再添加一个是否符合ttft_slo的属性
+        interrupted: Optional[Tuple[bool, float, int]] = (False, 0.0, 1), # fix: 把类型改为元组，添加第一次中断属性；再添加一个是否符合ttft_slo的属性
         metrics: Optional[RequestMetrics] = None,
         lora_request: Optional[LoRARequest] = None,
         encoder_prompt: Optional[str] = None,
@@ -122,7 +122,7 @@ class RequestOutput:
     def from_seq_group(cls, seq_group: SequenceGroup,
                        use_cache: bool) -> Optional["RequestOutput"]:
         # feat: 定义interrupted
-        interrupted = (False, True, 0.0)
+        interrupted = (False, 0.0, 1)
         sampling_params = seq_group.sampling_params
         if sampling_params is None:
             raise ValueError(
