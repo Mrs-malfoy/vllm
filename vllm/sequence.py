@@ -427,9 +427,13 @@ class Sequence:
 
         self.arrival_time = arrival_time
         self.first_token_time = None
-        self.tbt_slo = 0.1
+
+        self.slo_class = random.randint(1, 3)
+        self.slo_class = 1
+        self.ttft_slo = 1.08  
+        self.tbt_slo = 0.475  
         # feat: 新建记录播放是否中断的属性
-        self.interrupted: Tuple[bool, bool, float] = (False, True, 0.0)
+        self.interrupted: Tuple[bool, float, int] = (False, 0.0, 1)
 
         # For decoder-only models, a Sequence is constructed
         # from an DecoderOnlyInputs instance (the `inputs` arg.)
@@ -633,7 +637,7 @@ class Sequence:
             expected_time = num_tokens * self.tbt_slo
             headroom = expected_time - elapsed_time
             if headroom < 0:
-                self.interrupted = (True, self.interrupted[1], elapsed_time)
+                self.interrupted = (True, elapsed_time, self.slo_class)
         #self.seq_duration = 1.0
         # print(self.output_text)
 
@@ -925,8 +929,6 @@ class SequenceGroup:
                 and self.seqs[0].get_output_len() == 1):
             self.metrics.first_token_time = time
             self.seqs[0].first_token_time = time
-            if self.ttft_slo < self.metrics.first_token_time - self.arrival_time:
-                self.seqs[0].interrupted = (self.seqs[0].interrupted[0], False, self.seqs[0].interrupted[2])
 
     def maybe_set_first_scheduled_time(self, time: float) -> None:
         """Sets the first scheduled time and time in queue for Request

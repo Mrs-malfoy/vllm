@@ -749,7 +749,7 @@ class CompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{random_uuid()}")
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
-    interrupted: Tuple[bool, bool, float]
+    interrupted: Tuple[bool, float, int]
     model: str
     choices: List[CompletionResponseChoice]
     usage: UsageInfo
@@ -774,7 +774,7 @@ class CompletionStreamResponse(OpenAIBaseModel):
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
     # feat: 添加属性
-    interrupted: Tuple[bool, bool, float]
+    interrupted: Tuple[bool, float, int]
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)

@@ -353,6 +353,30 @@ async def get_request(
             # The next request will be sent after the interval.
             await asyncio.sleep(interval)
 
+def check_slo_compliance(output: RequestFuncOutput) -> bool:
+    """
+    检查请求是否满足SLO要求
+    Args:
+        output: 包含ttft和slo类型的请求输出
+    Returns:
+        bool: 是否满足SLO要求
+    """
+    # 获取SLO类型
+    slo_type = output.interrupted[2]
+    
+    # 根据SLO类型设置ttft阈值(单位:秒)
+    ttft_slo = {
+        1: 1.08,  # 1.08秒
+        2: 2.0,   # 2秒
+        3: 5.0    # 5秒
+    }.get(slo_type)
+    
+    # 如果slo_type不在预设值中,返回True
+    if ttft_slo is None:
+        return True
+        
+    # 比较实际ttft和阈值
+    return output.ttft <= ttft_slo
 
 def calculate_metrics(
     input_requests: List[Tuple[str, int, int]],
@@ -385,7 +409,7 @@ def calculate_metrics(
             if outputs[i].interrupted[0]:
                 interrupted += 1
 
-            if not outputs[i].interrupted[0] and outputs[i].interrupted[1]:
+            if not outputs[i].interrupted[0] and check_slo_compliance(outputs[i]):
                 goodput_count += 1
 
             output_len = len(
@@ -402,7 +426,7 @@ def calculate_metrics(
             ttfss.append(outputs[i].ttfs)
             fsls.append(outputs[i].fsl)
             fsts.append(outputs[i].fst)
-            fit.append(outputs[i].interrupted[2])
+            fit.append(outputs[i].interrupted[1])
             completed += 1
         else:
             actual_output_lens.append(0)
@@ -610,7 +634,7 @@ async def benchmark(
         "ttfss": [output.ttfs for output in outputs],
         "ttfts": [output.ttft for output in outputs],
         "itls": [output.itl for output in outputs],
-        "fit": [output.interrupted[2] for output in outputs],
+        "fit": [output.interrupted[1] for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
         "errors": [output.error for output in outputs],
     }
