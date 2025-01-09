@@ -54,10 +54,13 @@ class SchedulingBudget:
     """
     token_budget: int
     max_num_seqs: int
+    load_budget: int = 20   # 假设最大并行度是10
     _request_ids_num_batched_tokens: Set[str] = field(default_factory=set)
     _request_ids_num_curr_seqs: Set[str] = field(default_factory=set)
     _num_batched_tokens: int = 0
     _num_curr_seqs: int = 0
+    _sum_load: float = 0.0
+
 
     def can_schedule(self, *, num_new_tokens: int, num_new_seqs: int):
         assert num_new_tokens != 0
@@ -791,6 +794,8 @@ class Scheduler:
 
                 budget.add_num_batched_tokens(seq_group.request_id,
                                               num_running_tokens)
+                
+                # budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo
                 # OPTIMIZATION:  Note that get_max_num_running_seqs is
                 # expensive. For the default scheduling chase where
                 # enable_chunking is False, num_seqs are updated before running
@@ -952,6 +957,7 @@ class Scheduler:
                     ScheduledSequenceGroup(seq_group, token_chunk_size=1))
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
+            # budget._sum_load += (self.chunked_prefill_overhead+self.swap_overhead) / self.tbt_slo
 
         swapped_queue.extendleft(leftover_swapped)
 
@@ -1632,7 +1638,12 @@ class Scheduler:
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
+            load_budget=20
         )
+        budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
+        budget._sum_load += (self.swap_overhead + self.chunked_prefill_overhead) / self.tbt_slo * len(self.swapped)
+        print(f"budget._sum_load: {budget._sum_load}")
+
         curr_loras: Set[int] = set()
 
         prefills = SchedulerPrefillOutputs.create_empty()
