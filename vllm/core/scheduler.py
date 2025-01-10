@@ -1650,7 +1650,8 @@ class Scheduler:
         for seq_group in self.swapped:
             budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
 
-        budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数        
+        if len(self.swapped) + len(self.running) > 0:
+            budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数        
 
         curr_loras: Set[int] = set()
 
