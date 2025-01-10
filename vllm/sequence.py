@@ -630,6 +630,11 @@ class Sequence:
             expected_time = num_tokens * self.tbt_slo
             headroom = expected_time - elapsed_time
             if headroom < 0:
+                print(f"num_tokens:{num_tokens}")
+                print(f"output_text:{self.output_text}")
+                print(f"elapsed_time:{elapsed_time}")
+                print(f"expected_time:{expected_time}")
+                print(f"headroom:{headroom}")
                 self.interrupted = (True, elapsed_time, self.slo_class)
         #self.seq_duration = 1.0
         # print(self.output_text)

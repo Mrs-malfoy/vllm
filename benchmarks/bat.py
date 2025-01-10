@@ -5,10 +5,10 @@ def run_benchmark(request_rate, run_number):
     cmd = f"""python benchmark_serving.py \
         --backend vllm \
         --dataset-name sharegpt \
-        --dataset-path filtered_output.jsonl \
+        --dataset-path sharegpt-data.jsonl \
         --model Rookie/Llama-3-8B-Instruct-Chinese \
         --ignore-eos \
-        --num-prompts {900 * request_rate} \
+        --num-prompts {1000} \
         --request-rate {request_rate} \
         --save-result"""
     
@@ -22,7 +22,7 @@ def run_benchmark(request_rate, run_number):
 
 def main():
     # 定义要测试的request-rate值
-    rates = [6, 8, 10, 12, 14]  # 可以根据需要修改
+    rates = [14]  # 可以根据需要修改
     runs_per_rate = 1  # 每个速率测试5次
     
     for rate in rates:
