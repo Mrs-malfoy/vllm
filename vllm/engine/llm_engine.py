@@ -1354,28 +1354,28 @@ class LLMEngine:
             end_time1 = time.perf_counter()
             scheduler_time = end_time1 - start_time
 
-            logger.info(f"swapin: {scheduler_outputs.blocks_to_swap_in}")
-            logger.info(f"swapout: {scheduler_outputs.blocks_to_swap_out}")
+            # logger.info(f"swapin: {scheduler_outputs.blocks_to_swap_in}")
+            # logger.info(f"swapout: {scheduler_outputs.blocks_to_swap_out}")
 
             count_decode = 0
             count_prefill = 0
             total_new_token = 0
             running_blocks = []
             for sg in scheduler_outputs.scheduled_seq_groups:
-                seq = sg.seq_group.seqs[0]
-                if(seq.seq_id in self.scheduler[0].block_manager.block_tables):
-                    running_blocks.extend(self.scheduler[0].block_manager.get_block_table(seq))
-                else:
-                    logger.info(f"seq_id: {seq.seq_id} not in block_tables")
+                # seq = sg.seq_group.seqs[0]
+                # if(seq.seq_id in self.scheduler[0].block_manager.block_tables):
+                #     running_blocks.extend(self.scheduler[0].block_manager.get_block_table(seq))
+                # else:
+                #     logger.info(f"seq_id: {seq.seq_id} not in block_tables")
                 if sg.seq_group.is_prefill():
                     count_prefill += 1
                     total_new_token += sg.token_chunk_size
-                    logger.info(f"chunked prefill size: {sg.token_chunk_size}")
+                    # logger.info(f"chunked prefill size: {sg.token_chunk_size}")
                 else:
                     count_decode += 1
                     total_new_token += 1
 
-            logger.info(f"using: {running_blocks}")
+            # logger.info(f"using: {running_blocks}")
 
 
             ctx.seq_group_metadata_list = seq_group_metadata_list
