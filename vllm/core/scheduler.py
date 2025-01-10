@@ -553,7 +553,7 @@ class Scheduler:
             # 计算预期剩余时间
             elapsed_time = current_time - seq_group.arrival_time
             expected_time = num_chunks * self.chunked_prefill_overhead
-            headroom = seq_group.ttft_slo - (elapsed_time + expected_time)
+            headroom = seq_group.seqs[0].ttft_slo - (elapsed_time + expected_time)
         
             
         else:
@@ -563,7 +563,7 @@ class Scheduler:
             elapsed_time = current_time - seq_group.metrics.first_token_time
             num_tokens = seq_group.seqs[0].get_output_len()
             
-            expected_time = num_tokens * seq_group.tbt_slo
+            expected_time = num_tokens * seq_group.seqs[0].tbt_slo
             headroom = expected_time - (elapsed_time + self.decode_overhead)
         
         return headroom
@@ -1662,12 +1662,12 @@ class Scheduler:
         # print(f"budget._sum_load: {budget._sum_load}")
         min_headroom = 99999
         for seq_group in self.running:
-            budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
+            budget._sum_load += self.chunked_prefill_overhead / seq_group.seqs[0].tbt_slo
             min_headroom = min(min_headroom, self._get_running_headroom(seq_group))
 
         
         for seq_group in self.swapped:
-            budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
+            budget._sum_load += self.chunked_prefill_overhead / seq_group.seqs[0].tbt_slo
             min_headroom = min(min_headroom, self._get_swapped_headroom(seq_group))
 
         budget.hybrid_batch_time_budget = min_headroom # 不回滚_get_running_headroom里面计算过的decode时间，直接作为安全时间
