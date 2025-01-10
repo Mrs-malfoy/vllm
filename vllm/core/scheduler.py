@@ -4,7 +4,7 @@ import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Deque, Dict, Iterable, List, Optional
+from typing import Callable, ClassVar, Deque, Dict, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Set, Tuple, Union
 
@@ -52,6 +52,7 @@ class SchedulingBudget:
     happen if we only have chunked prefill scheduling, we can remove this
     feature from the API when chunked prefill is enabled by default.
     """
+    _current_load_budget: ClassVar[int] = 512
     token_budget: int
     max_num_seqs: int
     load_budget: int = 512   # 假设最大并行度是10
@@ -1639,7 +1640,7 @@ class Scheduler:
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
-            load_budget=512
+            load_budget=SchedulingBudget._current_load_budget
         )
         budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
         budget._sum_load += (self.swap_overhead + self.chunked_prefill_overhead) / self.tbt_slo * len(self.swapped)
@@ -1676,6 +1677,7 @@ class Scheduler:
             if len(running_scheduled.preempted) + len(
                     running_scheduled.swapped_out) != 0:
                 budget.load_budget = len(running_scheduled.prefill_seq_groups) + len(running_scheduled.decode_seq_groups)
+                SchedulingBudget._current_load_budget = budget.load_budget
 
             if len(running_scheduled.preempted) + len(
                     running_scheduled.swapped_out) == 0 or self._get_most_urgent_swapped_headroom() <= 0:
