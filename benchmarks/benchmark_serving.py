@@ -106,6 +106,7 @@ def sample_sharegpt_requests(
                 dataset.append(data["conversation"][0])
 
     # 打乱数据集
+    random.seed(time.time())
     random.shuffle(dataset)
 
     # Filter out sequences that are too long or too short
