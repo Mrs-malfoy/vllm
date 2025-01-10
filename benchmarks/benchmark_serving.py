@@ -555,6 +555,7 @@ async def benchmark(
 
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
+    completion_times: List[float] = []  # 新增：用于存储每个请求的完成时间
     async for request in get_request(input_requests, timestamps, time_scale, request_rate):
         prompt, prompt_len, output_len, completion_token_ids = request
         request_func_input = RequestFuncInput(model=model_id,
@@ -567,10 +568,12 @@ async def benchmark(
                                               best_of=best_of,
                                               multi_modal_content=None,
                                               ignore_eos=ignore_eos)
-        tasks.append(
-            asyncio.create_task(
-                request_func(request_func_input=request_func_input,
-                             pbar=pbar)))
+        async def wrapped_request():
+            result = await request_func(request_func_input=request_func_input, pbar=pbar)
+            completion_times.append(time.perf_counter() - benchmark_start_time)
+            return result
+            
+        tasks.append(asyncio.create_task(wrapped_request()))    
     outputs: List[RequestFuncOutput] = await asyncio.gather(*tasks)
 
     if profile:
@@ -640,6 +643,9 @@ async def benchmark(
         "fit": [output.interrupted[1] for output in outputs],
         "generated_texts": [output.generated_text for output in outputs],
         "errors": [output.error for output in outputs],
+        "completion_times": completion_times,
+        "slo_class": [output.interrupted[2] for output in outputs],
+        "is_interrupted": [output.interrupted[0] for output in outputs],
     }
 
     def process_one_metric(
