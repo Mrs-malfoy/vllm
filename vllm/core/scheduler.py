@@ -56,6 +56,7 @@ class SchedulingBudget:
     token_budget: int
     max_num_seqs: int
     load_budget: int = 512   # 假设最大并行度是10
+    hybrid_batch_time_budget: float = 9999
     _request_ids_num_batched_tokens: Set[str] = field(default_factory=set)
     _request_ids_num_curr_seqs: Set[str] = field(default_factory=set)
     _num_batched_tokens: int = 0
@@ -329,10 +330,25 @@ class Scheduler:
 
         self.ttft_slo = self.scheduler_config.ttft_slo
         self.tbt_slo = self.scheduler_config.tbt_slo
-        self.swap_overhead = 0.08  # 80ms的swap开销
+        # self.swap_overhead = 0.08  # 80ms的swap开销
         self.decode_overhead = 0.02  # 20ms的decode开销
         self.chunked_prefill_overhead = 0.06     # 60ms的chunked prefill开销
         self.prefill_rate = 0.08    # 预估prefill速率
+
+        self.max_hybrid_batch_time = 99999
+        self.max_hybrid_batch_bs = 4096
+        self.safe_headroom = 0.1 # 安全余量
+        self.min_hybrid_batch_bs = 256
+
+        # 4090 LLaMa3 8B
+        self.dcp_predict_bs_factor = 0.00011018 
+        self.dcp_predict_token_factor = 0.00018776  
+        self.swap_overhead_factor = 0.000243 #每个block的swap开销 单位秒
+
+        # A800*2 QWen 35B
+        # self.dcp_predict_bs_factor = 0.00016848
+        # self.dcp_predict_token_factor = 0.00000097
+        # self.swap_overhead_factor = TBD #每个block的swap开销 单位秒
 
         version = "selfattn"
         if (self.scheduler_config.embedding_mode
@@ -556,7 +572,7 @@ class Scheduler:
         """计算swapped请求的余量"""
         running_headroom = self._get_running_headroom(seq_group)
         # 需要额外考虑swap开销
-        return running_headroom - 2 * self.swap_overhead
+        return running_headroom - self.swap_overhead_factor * seq_group.seqs[0].block_size
     
     def _get_most_urgent_swapped_headroom(self) -> float:
         """获取swap队列中最紧急的余量"""
@@ -876,7 +892,7 @@ class Scheduler:
             if alloc_status == AllocStatus.LATER:
                 logger.info("swapped LATER begin")
                 # 如果剩余时间小于阈值,尝试强制恢复
-                if self._get_swapped_headroom(seq_group) <= 0:  # 可配置的阈值
+                if self._get_swapped_headroom(seq_group) <= self.safe_headroom:  # 可配置的阈值
                     logger.info(
                         f"Attempting force schedule for sequence {seq_group.request_id} "
                     )
@@ -1157,7 +1173,7 @@ class Scheduler:
             if can_allocate == AllocStatus.LATER:
                 logger.info("prefill LATER begin")
                 # 只对LATER状态检查是否需要强制调度
-                if self._get_running_headroom(seq_group) <= 0:
+                if self._get_running_headroom(seq_group) <= self.safe_headroom:
                     logger.info(
                         f"Attempting force schedule for sequence {seq_group.request_id} "
                     )
@@ -1639,16 +1655,33 @@ class Scheduler:
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
-            load_budget=SchedulingBudget._current_load_budget
+            load_budget=SchedulingBudget._current_load_budget,
         )
         # budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
         # budget._sum_load += (self.swap_overhead + self.chunked_prefill_overhead) / self.tbt_slo * len(self.swapped)
         # print(f"budget._sum_load: {budget._sum_load}")
+        min_headroom = 99999
         for seq_group in self.running:
             budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
+            min_headroom = min(min_headroom, self._get_running_headroom(seq_group))
+
         
         for seq_group in self.swapped:
             budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
+            min_headroom = min(min_headroom, self._get_swapped_headroom(seq_group))
+
+        budget.hybrid_batch_time_budget = min_headroom + self.decode_overhead - 0.02 # 回滚_get_running_headroom里面计算过的decode时间，但是留一个安全时间
+
+        for seq_group in self.running:
+            budget.hybrid_batch_time_budget -= seq_group.seqs[0].get_num_computed_tokens() * self.dcp_predict_token_factor + self.dcp_predict_bs_factor
+            
+        dcp_cp_bs = int(budget.hybrid_batch_time_budget / (self.dcp_predict_token_factor + self.dcp_predict_bs_factor))
+        dcp_hybrid_bs = dcp_cp_bs + len(self.running)
+        dcp_hybrid_bs = dcp_hybrid_bs // 16 * 16
+        dcp_hybrid_bs = min(256, dcp_hybrid_bs)
+        dcp_hybrid_bs = max(4096, dcp_hybrid_bs)
+        self.scheduler_config.max_num_batched_tokens = dcp_hybrid_bs
+        logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{dcp_hybrid_bs}")
 
         if len(self.swapped) + len(self.running) > 0:
             budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数        
@@ -1687,7 +1720,7 @@ class Scheduler:
                 SchedulingBudget._current_load_budget = budget.load_budget
 
             if len(running_scheduled.preempted) + len(
-                    running_scheduled.swapped_out) == 0 or self._get_most_urgent_swapped_headroom() <= 0:
+                    running_scheduled.swapped_out) == 0 or self._get_most_urgent_swapped_headroom() <= self.safe_headroom:
                 swapped_in = self._schedule_swapped(budget, curr_loras)
                 # print("swap finished")  # 注释
 
