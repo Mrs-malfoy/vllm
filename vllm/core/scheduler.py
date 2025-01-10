@@ -1681,7 +1681,7 @@ class Scheduler:
         dcp_hybrid_bs = min(256, dcp_hybrid_bs)
         dcp_hybrid_bs = max(4096, dcp_hybrid_bs)
         self.scheduler_config.max_num_batched_tokens = dcp_hybrid_bs
-        logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{dcp_hybrid_bs}")
+        logger.info(f"min_head_room:{min_headroom + self.decode_overhead}, dcp_hybrid_bs:{dcp_hybrid_bs}")
 
         if len(self.swapped) + len(self.running) > 0:
             budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数        
