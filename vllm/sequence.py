@@ -4,6 +4,7 @@ import enum
 import random
 import re
 import time
+from vllm.slo_config import SLOConfig
 
 from abc import ABC, abstractmethod
 from array import array
@@ -428,19 +429,10 @@ class Sequence:
         self.arrival_time = arrival_time
         self.first_token_time = None
 
-        self.slo_class = random.randint(1, 3)
-        if self.slo_class == 1:
-            # 高优先级：严格的TTFT，宽松的TBT
-            self.ttft_slo = 1.08  # 首token响应时间要求1.5秒
-            self.tbt_slo = 0.475   # 每token生成时间要求0.1秒
-        elif self.slo_class == 2:
-            # 中优先级：宽松的TTFT，严格的TBT
-            self.ttft_slo = 5.0   # 首token响应时间要求5秒
-            self.tbt_slo = 0.05   # 每token生成时间要求0.05秒
-        else:  # class 3
-            # 低优先级：平衡的TTFT和TBT
-            self.ttft_slo = 3.0    # 首token响应时间要求3秒
-            self.tbt_slo = 0.075   # 每token生成时间要求0.075秒
+        self.slo_class = random.randint(1, SLOConfig.slo_type_num)
+        self.ttft_slo = SLOConfig.ttft_slos[self.slo_class - 1]
+        self.tbt_slo = SLOConfig.tbt_slos[self.slo_class - 1]
+
         # feat: 新建记录播放是否中断的属性
         self.interrupted: Tuple[bool, float, int] = (False, 0.0, self.slo_class)
 
@@ -782,21 +774,10 @@ class SequenceGroup:
         priority: int = 0,
     ) -> None:
         # 随机分配服务等级(1-3)
-        self.slo_class = random.randint(1, 3)
-        # self.slo_class = 1
-        # 根据服务等级设置SLO参数
-        if self.slo_class == 1:
-            # 高优先级：严格的TTFT，宽松的TBT
-            self.ttft_slo = 1.08  # 首token响应时间要求1.5秒
-            self.tbt_slo = 0.475   # 每token生成时间要求0.1秒
-        elif self.slo_class == 2:
-            # 中优先级：宽松的TTFT，严格的TBT
-            self.ttft_slo = 5.0   # 首token响应时间要求5秒
-            self.tbt_slo = 0.05   # 每token生成时间要求0.05秒
-        else:  # class 3
-            # 低优先级：平衡的TTFT和TBT
-            self.ttft_slo = 3.0    # 首token响应时间要求3秒
-            self.tbt_slo = 0.075   # 每token生成时间要求0.075秒
+
+        # self.slo_class = random.randint(1, SLOConfig.slo_type_num)
+        # self.ttft_slo = SLOConfig.ttft_slos[self.slo_class - 1]
+        # self.tbt_slo = SLOConfig.tbt_slos[self.slo_class - 1]
 
         self.request_id = request_id
         self.seqs = seqs

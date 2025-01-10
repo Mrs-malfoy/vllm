@@ -52,6 +52,7 @@ try:
 except ImportError:
     from argparse import ArgumentParser as FlexibleArgumentParser
 
+from vllm.slo_config import SLOConfig
 
 @dataclass
 class BenchmarkMetrics:
@@ -366,11 +367,7 @@ def check_slo_compliance(output: RequestFuncOutput) -> bool:
     slo_type = output.interrupted[2]
     
     # 根据SLO类型设置ttft阈值(单位:秒)
-    ttft_slo = {
-        1: 1.08,  # 1.08秒
-        2: 2.0,   # 2秒
-        3: 5.0    # 5秒
-    }.get(slo_type)
+    ttft_slo = SLOConfig.ttft_slos[slo_type - 1]
     
     # 如果slo_type不在预设值中,返回True
     if ttft_slo is None:
