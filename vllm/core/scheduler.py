@@ -342,7 +342,7 @@ class Scheduler:
 
         # 4090 LLaMa3 8B
         self.dcp_predict_bs_factor = 0.00011018 
-        self.dcp_predict_token_factor = 0.00018776  
+        self.dcp_predict_token_factor = 0.00000147  
         self.swap_overhead_factor = 0.000243 #每个block的swap开销 单位秒
 
         # A800*2 QWen 35B
@@ -1670,19 +1670,19 @@ class Scheduler:
             budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
             min_headroom = min(min_headroom, self._get_swapped_headroom(seq_group))
 
-        budget.hybrid_batch_time_budget = min_headroom + self.decode_overhead - 0.02 # 回滚_get_running_headroom里面计算过的decode时间，但是留一个安全时间
+        budget.hybrid_batch_time_budget = min_headroom # 不回滚_get_running_headroom里面计算过的decode时间，直接作为安全时间
 
         for seq_group in self.running:
-            budget.hybrid_batch_time_budget -= seq_group.seqs[0].get_num_computed_tokens() * self.dcp_predict_token_factor + self.dcp_predict_bs_factor
-            
+            budget.hybrid_batch_time_budget -= seq_group.seqs[0].data.get_num_computed_tokens() * self.dcp_predict_token_factor + self.dcp_predict_bs_factor
+        logger.info(f"budget.hybrid_batch_time_budget remains:{budget.hybrid_batch_time_budget}")
         dcp_cp_bs = int(budget.hybrid_batch_time_budget / (self.dcp_predict_token_factor + self.dcp_predict_bs_factor))
         dcp_hybrid_bs = dcp_cp_bs + len(self.running)
-        dcp_hybrid_bs = dcp_hybrid_bs // 16 * 16
-        dcp_hybrid_bs = min(256, dcp_hybrid_bs)
-        dcp_hybrid_bs = max(4096, dcp_hybrid_bs)
+        dcp_hybrid_bs = dcp_hybrid_bs // 128 * 128
+        dcp_hybrid_bs = max(256, dcp_hybrid_bs)
+        dcp_hybrid_bs = min(4096, dcp_hybrid_bs)
         self.scheduler_config.max_num_batched_tokens = dcp_hybrid_bs
-        logger.info(f"min_head_room:{min_headroom + self.decode_overhead}, dcp_hybrid_bs:{dcp_hybrid_bs}")
-
+        logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}")
+        budget.token_budget = self.scheduler_config.max_num_batched_tokens
         if len(self.swapped) + len(self.running) > 0:
             budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数        
 
