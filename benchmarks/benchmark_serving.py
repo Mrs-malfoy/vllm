@@ -322,6 +322,7 @@ def sample_burstgpt_requests(
 async def get_request(
     input_requests: List[Tuple[str, int, int]],
     timestamps: Optional[List[float]],
+    time_scale: Optional[int],
     request_rate: float,
 ) -> AsyncGenerator[Tuple[str, int, int], None]:
     start_time = time.time()
@@ -332,7 +333,8 @@ async def get_request(
         timestamps = timestamps[:req_len]
         # 使用提供的时间戳
         for request, timestamp in zip(input_requests, timestamps):
-            timestamp = timestamp / 100
+            if time_scale is not None:
+                timestamp = timestamp / time_scale
             current_time = time.time()
             wait_time = timestamp - (current_time - start_time)
             
@@ -485,6 +487,7 @@ async def benchmark(
     tokenizer: PreTrainedTokenizerBase,
     input_requests: List[Tuple[str, int, int, Optional[List[int]]]],
     timestamps: Optional[List[float]],
+    time_scale: Optional[int],
     logprobs: Optional[int],
     best_of: int,
     request_rate: float,
@@ -552,7 +555,7 @@ async def benchmark(
 
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
-    async for request in get_request(input_requests, timestamps, request_rate):
+    async for request in get_request(input_requests, timestamps, time_scale, request_rate):
         prompt, prompt_len, output_len, completion_token_ids = request
         request_func_input = RequestFuncInput(model=model_id,
                                               prompt=prompt,
@@ -811,6 +814,7 @@ def main(args: argparse.Namespace):
             tokenizer=tokenizer,
             input_requests=input_requests,
             timestamps=timestamps,
+            time_scale=args.time_scale,
             logprobs=args.logprobs,
             best_of=args.best_of,
             request_rate=args.request_rate,
@@ -899,7 +903,7 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "sonnet", "random", "hf"],
+        choices=["sharegpt", "sonnet", "random", "hf", "burstgpt"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument("--dataset-path",
@@ -1020,12 +1024,19 @@ if __name__ == "__main__":
         "Default value is \"99\". "
         "Use \"--percentile-metrics\" to select metrics.",
     )
+    # 添加新的参数timestamp-file
     parser.add_argument(
         "--timestamp-file",
         type=str,
         help="Path to CSV file containing request timestamps and token counts",
     )
 
+    parser.add_argument(
+        "--time-scale",
+        type=int,
+        default=100,
+        help="Time scale for the timestamp file",
+    )
     # group for dataset specific arguments
     sonnet_group = parser.add_argument_group("sonnet dataset options")
     sonnet_group.add_argument(
