@@ -54,7 +54,7 @@ class SchedulingBudget:
     """
     token_budget: int
     max_num_seqs: int
-    load_budget: int = 20   # 假设最大并行度是10
+    load_budget: int = 512   # 假设最大并行度是10
     _request_ids_num_batched_tokens: Set[str] = field(default_factory=set)
     _request_ids_num_curr_seqs: Set[str] = field(default_factory=set)
     _num_batched_tokens: int = 0
@@ -1201,7 +1201,8 @@ class Scheduler:
             num_new_seqs = seq_group.get_max_num_running_seqs()
             if (num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
-                                               num_new_seqs=num_new_seqs)):
+                                               num_new_seqs=num_new_seqs)
+                    or budget.num_batched_tokens >= budget.load_budget):
                 break
 
             # Can schedule this request.
@@ -1638,11 +1639,11 @@ class Scheduler:
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
-            load_budget=20
+            load_budget=512
         )
         budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
         budget._sum_load += (self.swap_overhead + self.chunked_prefill_overhead) / self.tbt_slo * len(self.swapped)
-        print(f"budget._sum_load: {budget._sum_load}")
+        # print(f"budget._sum_load: {budget._sum_load}")
 
         curr_loras: Set[int] = set()
 
@@ -1670,16 +1671,22 @@ class Scheduler:
         # If preemption happens, it means we don't have space for swap-in.
 
         if not flag:
+            # 如果发生了抢占，则需要更新load_budget
+            # 在这里更新是怕遇到那种几个cp把budget占完了的情况
+            if len(running_scheduled.preempted) + len(
+                    running_scheduled.swapped_out) != 0:
+                budget.load_budget = len(running_scheduled.prefill_seq_groups) + len(running_scheduled.decode_seq_groups)
+
             if len(running_scheduled.preempted) + len(
                     running_scheduled.swapped_out) == 0 or self._get_most_urgent_swapped_headroom() <= 0:
                 swapped_in = self._schedule_swapped(budget, curr_loras)
-                print("swap finished")  # 注释
+                # print("swap finished")  # 注释
 
             # Schedule new prefills.
             prefills = self._schedule_prefills(budget,
                                             curr_loras,
                                             enable_chunking=True)
-            print("prefill finished")  # 注释
+            # print("prefill finished")  # 注释
 
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)

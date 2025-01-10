@@ -5,10 +5,10 @@ def run_benchmark(request_rate, run_number):
     cmd = f"""python benchmark_serving.py \
         --backend vllm \
         --dataset-name sharegpt \
-        --dataset-path filtered_output.jsonl \
+        --dataset-path sharegpt-data.jsonl \
         --model Rookie/Llama-3-8B-Instruct-Chinese \
         --ignore-eos \
-        --num-prompts {900 * request_rate} \
+        --num-prompts {100} \
         --request-rate {request_rate} \
         --save-result"""
     
