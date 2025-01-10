@@ -1202,8 +1202,7 @@ class Scheduler:
             num_new_seqs = seq_group.get_max_num_running_seqs()
             if (num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
-                                               num_new_seqs=num_new_seqs)
-                    or budget.num_batched_tokens >= budget.load_budget):
+                                               num_new_seqs=num_new_seqs)):
                 break
 
             # Can schedule this request.
@@ -1642,9 +1641,16 @@ class Scheduler:
             max_num_seqs=self.scheduler_config.max_num_seqs,
             load_budget=SchedulingBudget._current_load_budget
         )
-        budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
-        budget._sum_load += (self.swap_overhead + self.chunked_prefill_overhead) / self.tbt_slo * len(self.swapped)
+        # budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
+        # budget._sum_load += (self.swap_overhead + self.chunked_prefill_overhead) / self.tbt_slo * len(self.swapped)
         # print(f"budget._sum_load: {budget._sum_load}")
+        for seq_group in self.running:
+            budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
+        
+        for seq_group in self.swapped:
+            budget._sum_load += self.chunked_prefill_overhead / seq_group.tbt_slo
+
+        budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数        
 
         curr_loras: Set[int] = set()
 
@@ -1684,10 +1690,11 @@ class Scheduler:
                 swapped_in = self._schedule_swapped(budget, curr_loras)
                 # print("swap finished")  # 注释
 
-            # Schedule new prefills.
-            prefills = self._schedule_prefills(budget,
-                                            curr_loras,
-                                            enable_chunking=True)
+            if budget._sum_load < budget.load_budget:
+                # Schedule new prefills.
+                prefills = self._schedule_prefills(budget,
+                                                curr_loras,
+                                                enable_chunking=True)
             # print("prefill finished")  # 注释
 
         assert (budget.num_batched_tokens <=
