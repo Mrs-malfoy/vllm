@@ -13,6 +13,6 @@
     "dcp_predict_bs_factor": 0.00011018,
     "dcp_predict_token_factor": 0.00000147,
     "swap_overhead_factor": 0.000243,
-    "load_factor": 0.5
+    "load_factor": 1.5
 
 }
