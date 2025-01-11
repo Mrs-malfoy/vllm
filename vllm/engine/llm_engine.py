@@ -1,4 +1,7 @@
+import json
 import time
+import os
+import vllm
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -56,6 +59,8 @@ from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter, Device, deprecate_kwargs, weak_bind
 from vllm.version import __version__ as VLLM_VERSION
+
+from vllm.slo_config import SLOConfigInstance
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -1264,6 +1269,34 @@ class LLMEngine:
                 else:
                     seq.append_token_id(sample.output_token, sample.logprobs)
 
+    def reconfig(self):
+        
+        # 尝试刷新配置
+        homepath = os.path.dirname(os.path.abspath(vllm.__file__))
+        file_path = os.path.join(homepath, 'envelop_config.json')
+        with open(file_path, 'r') as config_file:
+            config = json.load(config_file)
+            # 从配置文件更新scheduler参数
+            scheduler = self.scheduler[0]
+            scheduler.decode_overhead = config.get('decode_overhead', 0.02)
+            scheduler.chunked_prefill_overhead = config.get('chunked_prefill_overhead', 0.06)
+            scheduler.prefill_rate = config.get('prefill_rate', 0.08)
+            scheduler.max_hybrid_batch_time = config.get('max_hybrid_batch_time', 99999)
+            scheduler.max_hybrid_batch_bs = config.get('max_hybrid_batch_bs', 4096)
+            scheduler.safe_headroom = config.get('safe_headroom', 0.1)
+            scheduler.min_hybrid_batch_bs = config.get('min_hybrid_batch_bs', 256)
+            scheduler.dcp_predict_bs_factor = config.get('dcp_predict_bs_factor', 0.00011018)
+            scheduler.dcp_predict_token_factor = config.get('dcp_predict_token_factor', 0.00000147)
+            scheduler.swap_overhead_factor = config.get('swap_overhead_factor', 0.000243)
+            scheduler.load_factor = config.get('load_factor', 0.1)
+            
+            SLOConfigInstance.slo_type_num = config.get('SLO_num', 3)
+            SLOConfigInstance.ttft_slos = config.get('TTFT_SLOs', [1, 1, 1])
+            SLOConfigInstance.tbt_slos = config.get('TBT_SLOs', [1, 1, 1])
+
+            logger.info(f"SLO config updated: {SLOConfigInstance.slo_type_num}, {scheduler.min_hybrid_batch_bs}, {scheduler.max_hybrid_batch_bs}")
+
+
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
@@ -1462,6 +1495,8 @@ class LLMEngine:
                 self._process_model_outputs(ctx=ctx)
             # No outputs in this case
             outputs = []
+
+
 
         # Finish the current step for all the sequence groups.
         if self.scheduler_config.is_multi_step:

@@ -344,6 +344,7 @@ class Scheduler:
         self.dcp_predict_bs_factor = 0.00011018 
         self.dcp_predict_token_factor = 0.00000147  
         self.swap_overhead_factor = 0.000243 #每个block的swap开销 单位秒
+        self.load_factor = 0.1
 
         # A800*2 QWen 35B
         # self.dcp_predict_bs_factor = 0.00016848
@@ -1678,13 +1679,15 @@ class Scheduler:
         dcp_cp_bs = int(budget.hybrid_batch_time_budget / (self.dcp_predict_token_factor + self.dcp_predict_bs_factor))
         dcp_hybrid_bs = dcp_cp_bs + len(self.running)
         dcp_hybrid_bs = dcp_hybrid_bs // 128 * 128
-        dcp_hybrid_bs = max(256, dcp_hybrid_bs)
-        dcp_hybrid_bs = min(4096, dcp_hybrid_bs)
+        dcp_hybrid_bs = max(self.min_hybrid_batch_bs, dcp_hybrid_bs)
+        dcp_hybrid_bs = min(self.max_hybrid_batch_bs, dcp_hybrid_bs)
         self.scheduler_config.max_num_batched_tokens = dcp_hybrid_bs
         logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}")
         budget.token_budget = self.scheduler_config.max_num_batched_tokens
         if len(self.swapped) + len(self.running) > 0:
-            budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数        
+            budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数 
+
+        can_schedule_more = ((len(self.swapped) / len(self.running)) <= self.load_factor)
 
         curr_loras: Set[int] = set()
 
@@ -1724,7 +1727,8 @@ class Scheduler:
                 swapped_in = self._schedule_swapped(budget, curr_loras)
                 # print("swap finished")  # 注释
 
-            if budget._sum_load < budget.load_budget:
+            # if budget._sum_load < budget.load_budget:
+            if can_schedule_more:
                 # Schedule new prefills.
                 prefills = self._schedule_prefills(budget,
                                                 curr_loras,
