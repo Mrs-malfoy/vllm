@@ -1377,6 +1377,7 @@ class Scheduler:
                 # self.running = running_seqs #确认成功以后再给self.running重新赋值
                 # print(f"success budget.num_batched_tokens:{budget.num_batched_tokens}")
                 # print(f"success budget.num_curr_seqs:{budget.num_curr_seqs}")
+                logger.info(f"success preempt for swapped seq")
                 return True, preempted_seqs
         print("force swap not ok")
         for seq in preempted_seqs:
@@ -1465,7 +1466,7 @@ class Scheduler:
 
                 # print(f"success budget.num_batched_tokens:{budget.num_batched_tokens}")
                 # print(f"success budget.num_curr_seqs:{budget.num_curr_seqs}")
-
+                logger.info(f"success preempt for waiting seq")
                 return True, preempted_seqs  # 返回成功状态和被抢占的序列
                 
         # 如果抢占所有序列后仍无法分配,则恢复抢占的序列
@@ -1682,13 +1683,15 @@ class Scheduler:
         dcp_hybrid_bs = max(self.min_hybrid_batch_bs, dcp_hybrid_bs)
         dcp_hybrid_bs = min(self.max_hybrid_batch_bs, dcp_hybrid_bs)
         self.scheduler_config.max_num_batched_tokens = dcp_hybrid_bs
-        logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}")
+        
         budget.token_budget = self.scheduler_config.max_num_batched_tokens
         can_schedule_more = True
         if len(self.running) > 0:
             budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数 
 
             can_schedule_more = ((len(self.swapped) / len(self.running)) <= self.load_factor)
+
+        logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}, can_schedule_more:{can_schedule_more}")
 
         curr_loras: Set[int] = set()
 

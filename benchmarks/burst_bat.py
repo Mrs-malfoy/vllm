@@ -22,7 +22,7 @@ def run_benchmark(scale, run_number, num_prompts):
 
 def main():
     # 定义要测试的request-rate值
-    IRs=[3, 2, 1]
+    IRs=[3]
     origin_time = 28436
 
     # scales = [100, 200, 300]  # 可以根据需要修改

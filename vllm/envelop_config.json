@@ -8,11 +8,11 @@
     "prefill_rate": 0.08,
     "max_hybrid_batch_time": 99999,
     "max_hybrid_batch_bs": 512,
-    "safe_headroom": 0.05,
+    "safe_headroom": -1,
     "min_hybrid_batch_bs": 512,
     "dcp_predict_bs_factor": 0.00011018,
     "dcp_predict_token_factor": 0.00000147,
     "swap_overhead_factor": 0.000243,
-    "load_factor": 0
+    "load_factor": 0.5
 
 }

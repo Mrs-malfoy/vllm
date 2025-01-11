@@ -411,6 +411,8 @@ def calculate_metrics(
 
             if not outputs[i].interrupted[0] and check_slo_compliance(outputs[i]):
                 goodput_count += 1
+            else:
+                print(f"request {i} SLO violation")
 
             output_len = len(
                 tokenizer(outputs[i].generated_text,
