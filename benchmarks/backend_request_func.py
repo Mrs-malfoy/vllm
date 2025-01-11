@@ -30,6 +30,7 @@ class RequestFuncInput:
     ignore_eos: bool = False
     # python语法：默认参数不能出现在非默认参数前面！
     completion_token_ids: Optional[List[int]] = None    # 加入原有输出
+    slo_class: Optional[int] = None
     
 
 
@@ -249,7 +250,8 @@ async def async_request_openai_completions(
             "logprobs": request_func_input.logprobs,
             "stream": True,
             "ignore_eos": request_func_input.ignore_eos,
-            "completion_token_ids": request_func_input.completion_token_ids,    # 添加客户端调用的参数
+            "completion_token_ids": request_func_input.completion_token_ids, 
+            "slo_class": request_func_input.slo_class,
         }
         headers = {
             "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
