@@ -1684,10 +1684,11 @@ class Scheduler:
         self.scheduler_config.max_num_batched_tokens = dcp_hybrid_bs
         logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}")
         budget.token_budget = self.scheduler_config.max_num_batched_tokens
-        if len(self.swapped) + len(self.running) > 0:
+        can_schedule_more = True
+        if len(self.running) > 0:
             budget._sum_load *= 1 + len(self.swapped)/(len(self.swapped) + len(self.running)) * 0.1   # 这个0.1为可修改参数 
 
-        can_schedule_more = ((len(self.swapped) / len(self.running)) <= self.load_factor)
+            can_schedule_more = ((len(self.swapped) / len(self.running)) <= self.load_factor)
 
         curr_loras: Set[int] = set()
 
