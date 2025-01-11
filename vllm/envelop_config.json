@@ -1,18 +1,18 @@
 {
-    "SLO_num": 4,
-    "TTFT_SLOs": [1, 1, 1, 1],
-    "TBT_SLOs": [1, 1, 1, 1],
+    "SLO_num": 2,
+    "TTFT_SLOs": [10, 0.2],
+    "TBT_SLOs": [1, 1],
     
     "decode_overhead": 0.02,
     "chunked_prefill_overhead": 0.06,
     "prefill_rate": 0.08,
     "max_hybrid_batch_time": 99999,
-    "max_hybrid_batch_bs": 4096,
-    "safe_headroom": 0.1,
-    "min_hybrid_batch_bs": 1024,
+    "max_hybrid_batch_bs": 512,
+    "safe_headroom": 0.05,
+    "min_hybrid_batch_bs": 512,
     "dcp_predict_bs_factor": 0.00011018,
     "dcp_predict_token_factor": 0.00000147,
     "swap_overhead_factor": 0.000243,
-    "load_factor": 0.1
+    "load_factor": 0
 
 }
