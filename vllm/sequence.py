@@ -429,7 +429,7 @@ class Sequence:
         self.arrival_time = arrival_time
         self.first_token_time = None
 
-        self.slo_class = random.randint(1, SLOConfigInstance.slo_type_num)
+        self.slo_class = 1
         self.ttft_slo = SLOConfigInstance.ttft_slos[self.slo_class - 1]
         self.tbt_slo = SLOConfigInstance.tbt_slos[self.slo_class - 1]
 

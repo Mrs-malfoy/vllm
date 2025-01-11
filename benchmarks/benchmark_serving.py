@@ -556,7 +556,10 @@ async def benchmark(
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
     completion_times: List[float] = []  # 新增：用于存储每个请求的完成时间
+    slo_classes: List[int] = [1, 2, 1, 2, 1, 1, 1, 2, 1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1, 2, 1, 1, 2, 1, 2, 2, 2, 2, 1, 2, 2, 1, 2, 2, 1, 2, 2, 1, 1, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 2, 1, 2, 1, 2, 2, 1, 2, 2, 1, 1, 2, 2, 1, 1, 1, 1, 2, 1, 1, 2, 1, 2, 1, 1, 1, 2, 1, 2, 2, 2, 2, 1, 2, 1, 2, 1, 1, 1, 1, 2, 1, 1, 2, 1, 2, 1, 2, 1, 2, 1]
+    i = 0
     async for request in get_request(input_requests, timestamps, time_scale, request_rate):
+        # print(slo_classes[i])
         prompt, prompt_len, output_len, completion_token_ids = request
         request_func_input = RequestFuncInput(model=model_id,
                                               prompt=prompt,
@@ -564,10 +567,12 @@ async def benchmark(
                                               prompt_len=prompt_len,
                                               output_len=output_len,
                                               completion_token_ids=completion_token_ids,    # 加入原有输出
+                                              slo_class=slo_classes[i],
                                               logprobs=logprobs,
                                               best_of=best_of,
                                               multi_modal_content=None,
                                               ignore_eos=ignore_eos)
+        i += 1
         async def wrapped_request():
             result = await request_func(request_func_input=request_func_input, pbar=pbar)
             completion_times.append(time.perf_counter() - benchmark_start_time)
@@ -619,6 +624,8 @@ async def benchmark(
                                     metrics.request_throughput))
     print("{:<40} {:<10.2f}".format("Request goodput (req/s):",
                                     metrics.goodput))
+    print("{:<40} {:<10.2f}".format("Good_rate(%):",
+                                    metrics.goodput/metrics.request_throughput*100))
     print("{:<40} {:<10.2f}".format("Output token throughput (tok/s):",
                                     metrics.output_throughput))
     print("{:<40} {:<10.2f}".format("Total Token throughput (tok/s):",
