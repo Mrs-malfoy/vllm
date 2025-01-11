@@ -210,6 +210,7 @@ class MQLLMEngine:
                 while self.input_socket.poll(timeout=POLLING_TIMEOUT_MS) == 0:
                     self._alive()
                     self.engine.do_log_stats()
+                    self.engine.reconfig()
                     logger.debug("Waiting for new requests in engine loop.")
 
             # Handle any input from the client.

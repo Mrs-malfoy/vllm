@@ -4,7 +4,7 @@ import enum
 import random
 import re
 import time
-from vllm.slo_config import SLOConfig
+from vllm.slo_config import SLOConfigInstance
 
 from abc import ABC, abstractmethod
 from array import array
@@ -429,9 +429,9 @@ class Sequence:
         self.arrival_time = arrival_time
         self.first_token_time = None
 
-        self.slo_class = random.randint(1, SLOConfig.slo_type_num)
-        self.ttft_slo = SLOConfig.ttft_slos[self.slo_class - 1]
-        self.tbt_slo = SLOConfig.tbt_slos[self.slo_class - 1]
+        self.slo_class = random.randint(1, SLOConfigInstance.slo_type_num)
+        self.ttft_slo = SLOConfigInstance.ttft_slos[self.slo_class - 1]
+        self.tbt_slo = SLOConfigInstance.tbt_slos[self.slo_class - 1]
 
         # feat: 新建记录播放是否中断的属性
         self.interrupted: Tuple[bool, float, int] = (False, 0.0, self.slo_class)
@@ -774,10 +774,6 @@ class SequenceGroup:
         priority: int = 0,
     ) -> None:
         # 随机分配服务等级(1-3)
-
-        # self.slo_class = random.randint(1, SLOConfig.slo_type_num)
-        # self.ttft_slo = SLOConfig.ttft_slos[self.slo_class - 1]
-        # self.tbt_slo = SLOConfig.tbt_slos[self.slo_class - 1]
 
         self.request_id = request_id
         self.seqs = seqs
