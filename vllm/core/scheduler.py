@@ -714,7 +714,7 @@ class Scheduler:
         self.running = deque(sorted(
             self.running,
             key=lambda x: (
-                self._get_running_headroom(x)
+                self._get_running_headroom(x) + (10000 if x.is_prefill() else 0)
             ),
             # reverse=True
         ))
@@ -1300,7 +1300,7 @@ class Scheduler:
         self.running = deque(sorted(
             self.running,
             key=lambda x: (
-               self._get_swapped_headroom(x)
+               self._get_swapped_headroom(x) + (-10000 if x.is_prefill() else 0)
             ),
             reverse=True  # 降序,剩余时间多的优先被抢占
         ))
@@ -1414,7 +1414,7 @@ class Scheduler:
         self.running = deque(sorted(
             self.running,
             key=lambda x: (
-                self._get_swapped_headroom(x)
+                self._get_swapped_headroom(x) + (-1000 if x.is_prefill() else 0)
             ),
             reverse=True
         ))
