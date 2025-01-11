@@ -573,7 +573,7 @@ class Scheduler:
         """计算swapped请求的余量"""
         running_headroom = self._get_running_headroom(seq_group)
         # 需要额外考虑swap开销
-        return running_headroom - self.swap_overhead_factor * seq_group.seqs[0].block_size
+        return running_headroom - 2 * self.swap_overhead_factor * seq_group.seqs[0].block_size
     
     def _get_most_urgent_swapped_headroom(self) -> float:
         """获取swap队列中最紧急的余量"""
