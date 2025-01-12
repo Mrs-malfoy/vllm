@@ -529,6 +529,25 @@ class Scheduler:
         if not self.swapped:
             return 0.0
         return max(self._get_swapped_overtime(seq_group) for seq_group in self.swapped)
+    
+    def _get_raw_headroom(self, seq_group: SequenceGroup) -> float:
+        """计算raw请求的余量"""
+        current_time = time.time()
+        
+        # 判断是否在prefill阶段
+        if seq_group.is_prefill():
+            return 10000
+        else:
+            # decode阶段的计算方式
+            if seq_group.metrics.first_token_time is None:
+                return 10000
+            elapsed_time = current_time - seq_group.metrics.first_token_time
+            num_tokens = seq_group.seqs[0].get_output_len()
+            
+            expected_time = num_tokens * seq_group.seqs[0].tbt_slo
+            headroom = expected_time - elapsed_time
+        
+            return headroom
 
     def _get_running_headroom(self, seq_group: SequenceGroup) -> float:
         """计算running请求的余量
@@ -548,14 +567,14 @@ class Scheduler:
             remaining_tokens = seq_group.get_num_uncomputed_tokens()
             
             # 计算还需要多少次chunk操作
-            chunk_size = self.scheduler_config.max_num_batched_tokens
-            num_chunks = (remaining_tokens + chunk_size - 1) // chunk_size  # 向上取整
+            # chunk_size = self.scheduler_config.max_num_batched_tokens
+            # num_chunks = (remaining_tokens + chunk_size - 1) // chunk_size  # 向上取整
             
             # 计算预期剩余时间
             elapsed_time = current_time - seq_group.arrival_time
-            expected_time = num_chunks * self.chunked_prefill_overhead
+            expected_time = remaining_tokens / (self.dcp_predict_bs_factor + self.dcp_predict_token_factor)
             headroom = seq_group.seqs[0].ttft_slo - (elapsed_time + expected_time)
-            print(f"calc headroom for running prefill! seq.request_id:{seq_group.request_id}, seq.wait_time:{time.time() - seq_group.arrival_time}, headrrom:{headroom}, slotype:{seq_group.seqs[0].slo_class}, ttft_slo:{seq_group.seqs[0].ttft_slo}")
+            # print(f"calc headroom for running prefill! seq.request_id:{seq_group.request_id}, seq.wait_time:{time.time() - seq_group.arrival_time}, headrrom:{headroom}, slotype:{seq_group.seqs[0].slo_class}, ttft_slo:{seq_group.seqs[0].ttft_slo}")
             # print(f"seq.request_id:{seq_group.request_id}, seq.wait_time:{time.time() - seq_group.arrival_time}, headrrom:{headroom}")
         
             
@@ -575,7 +594,10 @@ class Scheduler:
         """计算swapped请求的余量"""
         running_headroom = self._get_running_headroom(seq_group)
         # 需要额外考虑swap开销
-        return running_headroom - 2 * self.swap_overhead_factor * seq_group.seqs[0].block_size
+        if(seq_group.is_prefill()):
+            return running_headroom - 2 * self.swap_overhead_factor * len(seq_group.seqs[0].prompt_token_ids) / seq_group.seqs[0].block_size
+        else:
+            return running_headroom - 2 * self.swap_overhead_factor * seq_group.seqs[0].data._num_computed_tokens / seq_group.seqs[0].block_size
     
     def _get_most_urgent_swapped_headroom(self) -> float:
         """获取swap队列中最紧急的余量"""
@@ -716,14 +738,15 @@ class Scheduler:
         self.running = deque(sorted(
             self.running,
             key=lambda x: (
-                self._get_running_headroom(x) + (10000 if x.is_prefill() else 0)
+                # self._get_running_headroom(x) + (10000 if x.is_prefill() else 0)
+                self._get_running_headroom(x)
             ),
             # reverse=True
         ))
 
-        for seq in self.running:
-            if(seq.is_prefill()):
-                print(f"seq.request_id:{seq.request_id}, seq.wait_time:{time.time() - seq.arrival_time}, headrrom:{self._get_running_headroom(seq)}")
+        # for seq in self.running:
+        #     if(seq.is_prefill()):
+        #         print(f"seq.request_id:{seq.request_id}, seq.wait_time:{time.time() - seq.arrival_time}, headrrom:{self._get_running_headroom(seq)}")
         
         # print(f"running before budget.num_batched_tokens:{budget.num_batched_tokens}")
         # print(f"running before budget.num_curr_seqs:{budget.num_curr_seqs}")
@@ -1130,13 +1153,13 @@ class Scheduler:
                 self._get_running_headroom(x)
             )
         ))
-        for seq in self.waiting:
-            print(f"for waiting request: seq.request_id:{seq.request_id}, seq.wait_time:{time.time() - seq.arrival_time}, headrrom:{self._get_running_headroom(seq)}")
+        # for seq in self.waiting:
+        #     print(f"for waiting request: seq.c:{seq.request_id}, seq.wait_time:{time.time() - seq.arrival_time}, headrrom:{self._get_running_headroom(seq)}")
         waiting_queue = self.waiting
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
         while self._passed_delay(time.time()) and waiting_queue:
-            print(f"waiting_queue:{len(waiting_queue)}")
+            # print(f"waiting_queue:{len(waiting_queue)}")
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
@@ -1664,8 +1687,8 @@ class Scheduler:
         by prefill requests.
         """
         budget = SchedulingBudget(
-            token_budget=self.scheduler_config.max_num_batched_tokens,
-            max_num_seqs=self.scheduler_config.max_num_seqs,
+            token_budget=self.max_hybrid_batch_bs,
+            max_num_seqs=self.max_hybrid_batch_bs,
             load_budget=SchedulingBudget._current_load_budget,
         )
         # budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
@@ -1674,23 +1697,29 @@ class Scheduler:
         min_headroom = 99999
         for seq_group in self.running:
             budget._sum_load += self.chunked_prefill_overhead / seq_group.seqs[0].tbt_slo
-            min_headroom = min(min_headroom, self._get_running_headroom(seq_group))
+            rhr = self._get_raw_headroom(seq_group)
+            if(rhr > 0):
+                min_headroom = min(min_headroom, rhr)
 
         
         for seq_group in self.swapped:
             budget._sum_load += self.chunked_prefill_overhead / seq_group.seqs[0].tbt_slo
-            min_headroom = min(min_headroom, self._get_swapped_headroom(seq_group))
 
         budget.hybrid_batch_time_budget = min_headroom # 不回滚_get_running_headroom里面计算过的decode时间，直接作为安全时间
 
+        self.token_touched = 0
         for seq_group in self.running:
+            self.token_touched += seq_group.seqs[0].data.get_num_computed_tokens()
             budget.hybrid_batch_time_budget -= seq_group.seqs[0].data.get_num_computed_tokens() * self.dcp_predict_token_factor + self.dcp_predict_bs_factor
-        logger.info(f"budget.hybrid_batch_time_budget remains:{budget.hybrid_batch_time_budget}")
+        logger.info(f"min_headroom:{min_headroom}, budget.hybrid_batch_time_budget remains:{budget.hybrid_batch_time_budget}")
         dcp_cp_bs = int(budget.hybrid_batch_time_budget / (self.dcp_predict_token_factor + self.dcp_predict_bs_factor))
         dcp_hybrid_bs = dcp_cp_bs + len(self.running)
-        dcp_hybrid_bs = dcp_hybrid_bs // 128 * 128
         dcp_hybrid_bs = max(self.min_hybrid_batch_bs, dcp_hybrid_bs)
+        dcp_hybrid_bs = max((len(self.running)) // 128 * 128, dcp_hybrid_bs)
         dcp_hybrid_bs = min(self.max_hybrid_batch_bs, dcp_hybrid_bs)
+
+        dcp_hybrid_bs = dcp_hybrid_bs // 128 * 128
+
         self.scheduler_config.max_num_batched_tokens = dcp_hybrid_bs
         
         budget.token_budget = self.scheduler_config.max_num_batched_tokens
@@ -1700,7 +1729,7 @@ class Scheduler:
 
             can_schedule_more = ((len(self.swapped) / len(self.running)) <= self.load_factor)
 
-        logger.info(f"min_head_room:{min_headroom}, dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}, can_schedule_more:{can_schedule_more}")
+        logger.info(f"dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}, can_schedule_more:{can_schedule_more}")
 
         curr_loras: Set[int] = set()
 

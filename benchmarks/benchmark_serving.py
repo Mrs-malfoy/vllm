@@ -411,8 +411,8 @@ def calculate_metrics(
 
             if not outputs[i].interrupted[0] and check_slo_compliance(outputs[i]):
                 goodput_count += 1
-            else:
-                print(f"request {i} SLO violation")
+            # else:
+                # print(f"request {i} SLO violation")
 
             output_len = len(
                 tokenizer(outputs[i].generated_text,
@@ -581,8 +581,11 @@ async def benchmark(
                                               ignore_eos=ignore_eos)
         i += 1
         async def wrapped_request():
+            hash = random.randint(0, 1000000000)
+            # print(f"send request {hash} at {time.perf_counter() - benchmark_start_time}")
             result = await request_func(request_func_input=request_func_input, pbar=pbar)
             completion_times.append(time.perf_counter() - benchmark_start_time)
+            # print(f"recv request {hash} at {time.perf_counter() - benchmark_start_time}")
             return result
             
         tasks.append(asyncio.create_task(wrapped_request()))

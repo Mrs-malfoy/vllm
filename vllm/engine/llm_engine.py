@@ -1487,8 +1487,10 @@ class LLMEngine:
                     num_free_cpu = scheduler.block_manager.get_num_free_cpu_blocks()
                     cpu_cache_usage = 1.0 - (num_free_cpu / scheduler.block_manager.num_total_cpu_blocks)
             
-            logger.info(f"Schedule stats - decode:{count_decode}, prefill:{count_prefill}, total_new_token:{total_new_token}, swap:{len(scheduler_outputs.blocks_to_swap_in) + len(scheduler_outputs.blocks_to_swap_out)}, scheduler_time:{scheduler_time:.4f}, exec_time:{execute_model_time:.4f}, c_mem_use:{cpu_cache_usage}, g_mem_use:{gpu_cache_usage}")
+            logger.info(f"Schedule stats - decode:{count_decode}, prefill:{count_prefill}, swapped:{len(self.scheduler[0].swapped)}, total_new_token:{total_new_token}, swap:{len(scheduler_outputs.blocks_to_swap_in) + len(scheduler_outputs.blocks_to_swap_out)}, scheduler_time:{scheduler_time:.4f}, exec_time:{execute_model_time:.4f}, c_mem_use:{cpu_cache_usage}, g_mem_use:{gpu_cache_usage}")
 
+            with open('/workspace/vllm/lht-test/scripts/output.csv', 'a') as f:
+                f.write(f"{total_new_token},{self.scheduler[0].token_touched},{execute_model_time:.4f}\n")
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.

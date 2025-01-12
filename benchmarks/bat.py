@@ -6,9 +6,9 @@ def run_benchmark(request_rate, run_number):
         --backend vllm \
         --dataset-name sharegpt \
         --dataset-path sharegpt-data.jsonl \
-        --model Rookie/Llama-3-8B-Instruct-Chinese \
+        --model Qwen/Qwen2.5-32B-Instruct \
         --ignore-eos \
-        --num-prompts {100} \
+        --num-prompts {1600} \
         --request-rate {request_rate} \
         --save-result"""
     
@@ -22,7 +22,7 @@ def run_benchmark(request_rate, run_number):
 
 def main():
     # 定义要测试的request-rate值
-    rates = [14, 12, 10]  # 可以根据需要修改
+    rates = [20]  # 可以根据需要修改
     runs_per_rate = 1  # 每个速率测试5次
     
     for rate in rates:

@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # 从CSV文件读取数据
-data = pd.read_csv('output-4090.csv', header=None)
+data = pd.read_csv('output.csv', header=None)
 
-data[1] = data[1] * 128
+data[1] = data[1]
 
 # 提取x, y, z
 x = data[0]
