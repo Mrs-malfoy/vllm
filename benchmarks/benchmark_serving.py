@@ -554,7 +554,14 @@ async def benchmark(
     benchmark_start_time = time.perf_counter()
     tasks: List[asyncio.Task] = []
     completion_times: List[float] = []  # 新增：用于存储每个请求的完成时间
-    slo_classes: List[int] = [1, 2, 1, 2, 1, 1, 1, 2, 1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1, 2, 1, 1, 2, 1, 2, 2, 2, 2, 1, 2, 2, 1, 2, 2, 1, 2, 2, 1, 1, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 2, 1, 2, 1, 2, 2, 1, 2, 2, 1, 1, 2, 2, 1, 1, 1, 1, 2, 1, 1, 2, 1, 2, 1, 1, 1, 2, 1, 2, 2, 2, 2, 1, 2, 1, 2, 1, 1, 1, 1, 2, 1, 1, 2, 1, 2, 1, 2, 1, 2, 1]
+    slo_classes: List[int] = []
+    with open('random_numbers.txt', 'r') as file:
+        for line in file:
+            # 将每一行的字符串转换为整数，并添加到列表中
+            slo_classes.append(int(line.strip()))
+    file_len = len(slo_classes)
+
+    
     i = 0
     async for request in get_request(input_requests, timestamps, time_scale, request_rate):
         # print(slo_classes[i])
@@ -565,7 +572,7 @@ async def benchmark(
                                               prompt_len=prompt_len,
                                               output_len=output_len,
                                               completion_token_ids=completion_token_ids,    # 加入原有输出
-                                              slo_class=slo_classes[i],
+                                              slo_class=slo_classes[i % file_len] % SLOConfigInstance.slo_type_num + 1,
                                               logprobs=logprobs,
                                               best_of=best_of,
                                               multi_modal_content=None,

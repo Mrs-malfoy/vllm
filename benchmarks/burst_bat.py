@@ -5,8 +5,8 @@ def run_benchmark(scale, run_number, num_prompts):
     cmd = f"""python benchmark_serving.py\
              --backend vllm\
              --dataset-name burstgpt\
-             --timestamp-file ./Burst_1day.csv\
-             --model Rookie/Llama-3-8B-Instruct-Chinese\
+             --timestamp-file ./BurstGPT_1.csv\
+             --model Qwen/Qwen2.5-32B-Instruct\
              --ignore-eos\
              --save-result\
              --num-prompts {num_prompts}\
@@ -22,7 +22,7 @@ def run_benchmark(scale, run_number, num_prompts):
 
 def main():
     # 定义要测试的request-rate值
-    IRs=[3, 2, 1]
+    IRs=[2]
     origin_time = 28436
 
     # scales = [100, 200, 300]  # 可以根据需要修改
