@@ -328,8 +328,8 @@ class Scheduler:
         
         self.max_wait_time = scheduler_config.max_wait_time
 
-        self.ttft_slo = self.scheduler_config.ttft_slo
-        self.tbt_slo = self.scheduler_config.tbt_slo
+        # self.ttft_slo = self.scheduler_config.ttft_slo
+        # self.tbt_slo = self.scheduler_config.tbt_slo
         # self.swap_overhead = 0.08  # 80ms的swap开销
         self.decode_overhead = 0.02  # 20ms的decode开销
         self.chunked_prefill_overhead = 0.06     # 60ms的chunked prefill开销
@@ -555,6 +555,8 @@ class Scheduler:
             elapsed_time = current_time - seq_group.arrival_time
             expected_time = num_chunks * self.chunked_prefill_overhead
             headroom = seq_group.seqs[0].ttft_slo - (elapsed_time + expected_time)
+            print(f"calc headroom for running prefill! seq.request_id:{seq_group.request_id}, seq.wait_time:{time.time() - seq_group.arrival_time}, headrrom:{headroom}, slotype:{seq_group.seqs[0].slo_class}, ttft_slo:{seq_group.seqs[0].ttft_slo}")
+            # print(f"seq.request_id:{seq_group.request_id}, seq.wait_time:{time.time() - seq_group.arrival_time}, headrrom:{headroom}")
         
             
         else:
@@ -718,6 +720,11 @@ class Scheduler:
             ),
             # reverse=True
         ))
+
+        for seq in self.running:
+            if(seq.is_prefill()):
+                print(f"seq.request_id:{seq.request_id}, seq.wait_time:{time.time() - seq.arrival_time}, headrrom:{self._get_running_headroom(seq)}")
+        
         # print(f"running before budget.num_batched_tokens:{budget.num_batched_tokens}")
         # print(f"running before budget.num_curr_seqs:{budget.num_curr_seqs}")
         # print(f"running: len(self.running):{len(self.running)}")
@@ -1123,11 +1130,13 @@ class Scheduler:
                 self._get_running_headroom(x)
             )
         ))
+        for seq in self.waiting:
+            print(f"for waiting request: seq.request_id:{seq.request_id}, seq.wait_time:{time.time() - seq.arrival_time}, headrrom:{self._get_running_headroom(seq)}")
         waiting_queue = self.waiting
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
         while self._passed_delay(time.time()) and waiting_queue:
-            
+            print(f"waiting_queue:{len(waiting_queue)}")
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
