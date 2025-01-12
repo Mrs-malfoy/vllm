@@ -1,7 +1,7 @@
 {
     "SLO_num": 2,
-    "TTFT_SLOs": [10, 1],
-    "TBT_SLOs": [1, 1],
+    "TTFT_SLOs": [10, 2],
+    "TBT_SLOs": [1, 0.5],
     
     "decode_overhead": 0.05,
     "chunked_prefill_overhead": 0.1,
