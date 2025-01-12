@@ -870,6 +870,8 @@ class LLMEngine:
 
         if sampling_params.slo_class:
             seq.slo_class = sampling_params.slo_class
+            seq.ttft_slo = SLOConfigInstance.ttft_slos[seq.slo_class - 1]
+            seq.tbt_slo = SLOConfigInstance.tbt_slos[seq.slo_class - 1]
             seq.interrupted = (False, 0.0, seq.slo_class)
         seq.arrival_time = arrival_time # 给单个sequence也记录这个属性
         # Create the sequence group.
