@@ -1688,7 +1688,7 @@ class Scheduler:
         """
         budget = SchedulingBudget(
             token_budget=self.max_hybrid_batch_bs,
-            max_num_seqs=self.max_hybrid_batch_bs,
+            max_num_seqs=self.scheduler_config.max_num_seqs,
             load_budget=SchedulingBudget._current_load_budget,
         )
         # budget._sum_load += self.chunked_prefill_overhead / self.tbt_slo * len(self.running)
