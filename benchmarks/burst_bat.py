@@ -23,15 +23,16 @@ def run_benchmark(scale, run_number, num_prompts):
 def main():
     # 定义要测试的request-rate值
     IRs=[2]
-    origin_time = 37274
+    start_time = 1625450
+    end_time = 1626512
+    num_prompts = 1000
 
     # scales = [100, 200, 300]  # 可以根据需要修改
     runs_per_rate = 1  # 每个速率测试5次
-    num_prompts = 400
     
     for ir in IRs:
         target_time = num_prompts / ir
-        scale = int(origin_time / target_time)
+        scale = int((end_time - start_time) / target_time)
         for run in range(1, runs_per_rate + 1):
             run_benchmark(scale, run, num_prompts)
         print(f"\n完成 ir {ir} 的所有 {runs_per_rate} 次测试")
