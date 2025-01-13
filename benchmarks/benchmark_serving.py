@@ -1057,7 +1057,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--time-scale",
-        type=int,
+        type=float,
         default=100,
         help="Time scale for the timestamp file",
     )
