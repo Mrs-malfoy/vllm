@@ -8,7 +8,7 @@ def run_benchmark(request_rate, run_number):
         --dataset-path sharegpt-data.jsonl \
         --model Qwen/Qwen2.5-32B-Instruct \
         --ignore-eos \
-        --num-prompts {1600} \
+        --num-prompts {request_rate * 80} \
         --request-rate {request_rate} \
         --save-result"""
     
