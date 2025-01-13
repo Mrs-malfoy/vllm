@@ -572,7 +572,7 @@ class Scheduler:
             
             # 计算预期剩余时间
             elapsed_time = current_time - seq_group.arrival_time
-            expected_time = remaining_tokens / (self.dcp_predict_bs_factor + self.dcp_predict_token_factor)
+            expected_time = remaining_tokens * (self.dcp_predict_bs_factor + self.dcp_predict_token_factor)
             headroom = seq_group.seqs[0].ttft_slo - (elapsed_time + expected_time)
             # print(f"calc headroom for running prefill! seq.request_id:{seq_group.request_id}, seq.wait_time:{time.time() - seq_group.arrival_time}, headrrom:{headroom}, slotype:{seq_group.seqs[0].slo_class}, ttft_slo:{seq_group.seqs[0].ttft_slo}")
             # print(f"seq.request_id:{seq_group.request_id}, seq.wait_time:{time.time() - seq_group.arrival_time}, headrrom:{headroom}")
@@ -738,12 +738,20 @@ class Scheduler:
         self.running = deque(sorted(
             self.running,
             key=lambda x: (
-                # self._get_running_headroom(x) + (10000 if x.is_prefill() else 0)
-                self._get_running_headroom(x)
+                (10000 if x.is_prefill() else self._get_running_headroom(x))
+                # self._get_running_headroom(x)
             ),
             # reverse=True
         ))
-
+        output = []
+        for seq in self.running:
+            output.append(seq.is_prefill())
+        logger.info(f"running queue is prefill: {output}")
+        output = []
+        for seq in self.running:
+            output.append(self._get_running_headroom(seq) + (10000 if seq.is_prefill() else 0))
+        logger.info(f"running queue headroom: {output}")
+        
         # for seq in self.running:
         #     if(seq.is_prefill()):
         #         print(f"seq.request_id:{seq.request_id}, seq.wait_time:{time.time() - seq.arrival_time}, headrrom:{self._get_running_headroom(seq)}")
