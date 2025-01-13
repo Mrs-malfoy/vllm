@@ -22,7 +22,7 @@ def run_benchmark(request_rate, run_number):
 
 def main():
     # 定义要测试的request-rate值
-        rates = [50, 40, 30, 20, 10]  # 可以根据需要修改
+    rates = [50, 40, 30, 20, 10]  # 可以根据需要修改
     runs_per_rate = 1 
     
     print(f"开始测试 request-rate = {rates} evnelope vllm ")
