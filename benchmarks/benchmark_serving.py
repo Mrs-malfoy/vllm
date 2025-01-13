@@ -335,7 +335,7 @@ async def get_request(
         # 使用提供的时间戳
         for request, timestamp in zip(input_requests, timestamps):
             if time_scale is not None:
-                timestamp = timestamp / time_scale
+                timestamp = (timestamp - timestamps[0]) / time_scale
             current_time = time.time()
             wait_time = timestamp - (current_time - start_time)
             
