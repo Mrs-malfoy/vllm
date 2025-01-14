@@ -6,7 +6,7 @@ def run_benchmark(scale, run_number, num_prompts):
              --backend vllm\
              --dataset-name burstgpt\
              --timestamp-file ./BurstGPT_1000.csv\
-             --model Qwen/Qwen2.5-32B-Instruct\
+             --model Rookie/Llama-3-8B-Instruct-Chinese\
              --ignore-eos\
              --save-result\
              --num-prompts {num_prompts}\
@@ -22,10 +22,10 @@ def run_benchmark(scale, run_number, num_prompts):
 
 def main():
     # 定义要测试的request-rate值
-    IRs=[2]
+    IRs=[10, 8, 6, 4, 2]
     start_time = 1641010
-    end_time = 1641065
-    num_prompts = 100
+    end_time = 1641271
+    num_prompts = 500
 
     # scales = [100, 200, 300]  # 可以根据需要修改
     runs_per_rate = 1  # 每个速率测试5次
