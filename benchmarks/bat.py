@@ -2,15 +2,18 @@ import subprocess
 import time
 
 def run_benchmark(request_rate, run_number):
-    cmd = f"""python benchmark_serving.py \
+    cmd = f"""python ../benchmark_serving.py \
         --backend vllm \
         --dataset-name sharegpt \
-        --dataset-path filtered_output.jsonl \
+        --dataset-path ../filtered_output.jsonl \
         --model Rookie/Llama-3-8B-Instruct-Chinese \
         --ignore-eos \
-        --num-prompts 3000 \
+        --num-prompts 500 \
         --request-rate {request_rate} \
-        --save-result"""
+        --save-result\
+        --metric-percentiles 95,99\
+        --result-dir envelope/third_round_filter"""
+    
     
     try:
         print(f"\n开始测试 request-rate = {request_rate}, 第 {run_number} 次运行")
@@ -22,8 +25,8 @@ def run_benchmark(request_rate, run_number):
 
 def main():
     # 定义要测试的request-rate值
-    rates = [6.5, 7, 7.5, 8.5, 9, 9.5]  # 可以根据需要修改
-    runs_per_rate = 5  # 每个速率测试5次
+    rates = [15, 14, 13,12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]  # 可以根据需要修改
+    runs_per_rate = 1  # 每个速率测试5次
     
     for rate in rates:
         for run in range(1, runs_per_rate + 1):

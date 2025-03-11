@@ -554,6 +554,8 @@ async def benchmark(
     result = {
         "duration": benchmark_duration,
         "completed": metrics.completed,
+        "interrupted": metrics.interrupted,
+        "interrupted_rate": float(metrics.interrupted) / metrics.completed * 100,
         "total_input_tokens": metrics.total_input,
         "total_output_tokens": metrics.total_output,
         "request_throughput": metrics.request_throughput,
