@@ -330,8 +330,8 @@ class Scheduler:
         self.ttft_slo = self.scheduler_config.ttft_slo
         self.tbt_slo = self.scheduler_config.tbt_slo
         self.swap_overhead = 0.08  # 80ms的swap开销
-        self.decode_overhead = 0.02  # 20ms的decode开销
-        self.chunked_prefill_overhead = 0.06     # 60ms的chunked prefill开销
+        self.decode_overhead = 0.05  # 20ms的decode开销
+        self.chunked_prefill_overhead = 0.1     # 60ms的chunked prefill开销
         self.prefill_rate = 0.08    # 预估prefill速率
 
         version = "selfattn"

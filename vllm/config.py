@@ -982,7 +982,7 @@ class SchedulerConfig:
                  embedding_mode: bool = False,
                  is_multimodal_model: bool = False,
                  preemption_mode: Optional[str] = None,
-                 ttft_slo: Optional[float] = 1.5,
+                 ttft_slo: Optional[float] = 2,
                  tbt_slo: Optional[float] = 0.1,
                  num_scheduler_steps: int = 1,
                  multi_step_stream_outputs: bool = False,
