@@ -746,11 +746,11 @@ class Scheduler:
         output = []
         for seq in self.running:
             output.append(seq.is_prefill())
-        logger.info(f"running queue is prefill: {output}")
+        # logger.info(f"running queue is prefill: {output}")
         output = []
         for seq in self.running:
             output.append(self._get_running_headroom(seq) + (10000 if seq.is_prefill() else 0))
-        logger.info(f"running queue headroom: {output}")
+        # logger.info(f"running queue headroom: {output}")
         
         # for seq in self.running:
         #     if(seq.is_prefill()):
@@ -929,12 +929,12 @@ class Scheduler:
                 seq_group,
                 self._get_num_lookahead_slots(is_prefill, enable_chunking))
             if alloc_status == AllocStatus.LATER:
-                logger.info("swapped LATER begin")
+                # logger.info("swapped LATER begin")
                 # 如果剩余时间小于阈值,尝试强制恢复
                 if self._get_swapped_headroom(seq_group) <= self.safe_headroom:  # 可配置的阈值
-                    logger.info(
-                        f"Attempting force schedule for sequence {seq_group.request_id} "
-                    )
+                    # logger.info(
+                    #     f"Attempting force schedule for sequence {seq_group.request_id} "
+                    # )
                     # print(f"force budget.num_batched_tokens:{budget.num_batched_tokens}")
                     # print(f"force budget.num_curr_seqs:{budget.num_curr_seqs}")
                     success, preempted_seqs = self._force_swap_in_by_preemption(
@@ -952,7 +952,7 @@ class Scheduler:
                     # print(success)
                     
                     if success:
-                        logger.info("force preempt success")
+                        # logger.info("force preempt success")
                         swapped_queue.popleft()
                         swapped_out.extend(preempted_seqs)  # 将被抢占的序列添加到swapped队列
                         continue
@@ -1212,12 +1212,12 @@ class Scheduler:
                 continue
 
             if can_allocate == AllocStatus.LATER:
-                logger.info("prefill LATER begin")
+                # logger.info("prefill LATER begin")
                 # 只对LATER状态检查是否需要强制调度
                 if self._get_running_headroom(seq_group) <= self.safe_headroom:
-                    logger.info(
-                        f"Attempting force schedule for sequence {seq_group.request_id} "
-                    )
+                    # logger.info(
+                    #     f"Attempting force schedule for sequence {seq_group.request_id} "
+                    # )
 
                     success, preempted = self._force_preempt_for_waiting_seq(
                     seq_group, blocks_to_swap_in, blocks_to_swap_out, enable_chunking, budget, num_new_tokens)
@@ -1417,7 +1417,7 @@ class Scheduler:
                 # self.running = running_seqs #确认成功以后再给self.running重新赋值
                 # print(f"success budget.num_batched_tokens:{budget.num_batched_tokens}")
                 # print(f"success budget.num_curr_seqs:{budget.num_curr_seqs}")
-                logger.info(f"success preempt for swapped seq")
+                # logger.info(f"success preempt for swapped seq")
                 return True, preempted_seqs
         print("force swap not ok")
         for seq in preempted_seqs:
@@ -1506,7 +1506,7 @@ class Scheduler:
 
                 # print(f"success budget.num_batched_tokens:{budget.num_batched_tokens}")
                 # print(f"success budget.num_curr_seqs:{budget.num_curr_seqs}")
-                logger.info(f"success preempt for waiting seq")
+                # logger.info(f"success preempt for waiting seq")
                 return True, preempted_seqs  # 返回成功状态和被抢占的序列
                 
         # 如果抢占所有序列后仍无法分配,则恢复抢占的序列
@@ -1719,7 +1719,7 @@ class Scheduler:
         for seq_group in self.running:
             self.token_touched += seq_group.seqs[0].data.get_num_computed_tokens()
             budget.hybrid_batch_time_budget -= seq_group.seqs[0].data.get_num_computed_tokens() * self.dcp_predict_token_factor + self.dcp_predict_bs_factor
-        logger.info(f"min_headroom:{min_headroom}, budget.hybrid_batch_time_budget remains:{budget.hybrid_batch_time_budget}")
+        # logger.info(f"min_headroom:{min_headroom}, budget.hybrid_batch_time_budget remains:{budget.hybrid_batch_time_budget}")
         dcp_cp_bs = int(budget.hybrid_batch_time_budget / (self.dcp_predict_token_factor + self.dcp_predict_bs_factor))
         dcp_hybrid_bs = dcp_cp_bs + len(self.running)
         dcp_hybrid_bs = max(self.min_hybrid_batch_bs, dcp_hybrid_bs)
@@ -1737,7 +1737,7 @@ class Scheduler:
 
             can_schedule_more = ((len(self.swapped) / len(self.running)) <= self.load_factor)
 
-        logger.info(f"dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}, can_schedule_more:{can_schedule_more}")
+        # logger.info(f"dcp_hybrid_bs:{self.scheduler_config.max_num_batched_tokens}, can_schedule_more:{can_schedule_more}")
 
         curr_loras: Set[int] = set()
 

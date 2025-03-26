@@ -1,6 +1,6 @@
 {
     "SLO_num": 2,
-    "TTFT_SLOs": [5, 1],
+    "TTFT_SLOs": [10, 2],
     "TBT_SLOs": [0.5, 0.1],
     
     "decode_overhead": 0.1,
